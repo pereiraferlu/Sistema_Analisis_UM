@@ -82,16 +82,22 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
   );
 
   const isGeneral = selectedSucursal === "General";
+  // URL directa al backend en Render para producción (Vercel)
+  const BACKEND_URL = "https://flash-backend-lbej.onrender.com";
 
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      const response = await fetch("/api/export", {
+      const response = await fetch(`${BACKEND_URL}/api/export`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ data: filteredData, selectedSucursal, presupuestos }),
+        body: JSON.stringify({ 
+          data: filteredData, 
+          selectedSucursal, 
+          presupuestos 
+        }),
       });
 
       if (!response.ok) {
@@ -112,7 +118,7 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
       setIsSidebarOpen(false);
     } catch (error) {
       console.error("Export failed", error);
-      alert("Hubo un error al generar el archivo Excel. Por favor, asegúrate de que el servidor backend esté funcionando correctamente.");
+      alert("Hubo un error al generar el archivo Excel. Por favor, asegúrate de que el servidor backend en Render esté funcionando correctamente.");
     } finally {
       setIsExporting(false);
     }
@@ -121,7 +127,8 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
   const handleSaveAndExport = async () => {
     setIsSaving(true);
     try {
-      const response = await fetch("/api/export-consolidated", {
+      // Apuntando directamente al backend de Python en Render
+      const response = await fetch(`${BACKEND_URL}/api/export-consolidated`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -150,7 +157,7 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
       setIsSidebarOpen(false);
     } catch (error) {
       console.error("Consolidated export failed", error);
-      alert("Error al generar el archivo consolidado.");
+      alert("Error al generar el archivo consolidado. Asegúrate de que el backend en Render esté activo.");
     } finally {
       setIsSaving(false);
     }
