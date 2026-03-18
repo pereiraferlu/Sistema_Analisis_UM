@@ -251,10 +251,10 @@ export default function Zonas({
       ]
     : [
         { key: "name", label: "Zona", align: "left" as const },
-        { key: "piezasTotal", label: "Total Piezas", align: "center" as const },
         { key: "rutas", label: "Total Rutas", align: "center" as const },
-        { key: "entregadas", label: "Entregadas", align: "center" as const },
-        { key: "noEntregadas", label: "No Entregadas", align: "center" as const },
+        { key: "piezasTotal", label: "Total Piezas", align: "center" as const },
+        { key: "entregadas", label: "Piezas Entregadas", align: "center" as const },
+        { key: "noEntregadas", label: "Piezas No Entregadas", align: "center" as const },
         {
           key: "efectividad",
           label: "% Eficiencia",

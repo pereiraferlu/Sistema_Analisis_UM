@@ -203,28 +203,34 @@ export default function Costos({
       isGeneral ? d.sucursal === entityName : d.distribuidor === entityName
     );
 
-    const dailyCosts: Record<string, number> = {};
+    const subRowsMap = new Map<string, any>();
     entityData.forEach(d => {
       const fecha = d.fecha || "Sin Fecha";
-      dailyCosts[fecha] = (dailyCosts[fecha] || 0) + Math.round(d.costoTotal);
+      const hojaRuta = d.hojaRuta || "N/A";
+      // If general, group by fecha only. If sucursal, group by both.
+      const key = isGeneral ? fecha : `${fecha}-${hojaRuta}`;
+      
+      if (!subRowsMap.has(key)) {
+        subRowsMap.set(key, {
+          name: isGeneral ? fecha : `${fecha} - ${hojaRuta}`,
+          costoTotal: 0,
+          costoPromedioEntregada: null,
+          promedioCostoSucursal: null,
+          vehiculo: null,
+        });
+      }
+      const obj = subRowsMap.get(key);
+      obj.costoTotal += Math.round(d.costoTotal);
     });
 
-    const sortedDates = Object.keys(dailyCosts).sort((a, b) => {
-      const dateA = new Date(a.split("/").reverse().join("-"));
-      const dateB = new Date(b.split("/").reverse().join("-"));
+    return Array.from(subRowsMap.values()).sort((a, b) => {
+      const dateA = new Date(a.name.split(" ")[0].split("/").reverse().join("-"));
+      const dateB = new Date(b.name.split(" ")[0].split("/").reverse().join("-"));
       if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
         return dateA.getTime() - dateB.getTime();
       }
-      return a.localeCompare(b);
+      return a.name.localeCompare(b.name);
     });
-
-    return sortedDates.map(fecha => ({
-      name: fecha,
-      costoTotal: dailyCosts[fecha],
-      costoPromedioEntregada: null,
-      promedioCostoSucursal: null,
-      vehiculo: null,
-    }));
   };
 
   const presupuestoColumns = [
@@ -232,7 +238,7 @@ export default function Costos({
       key: "name",
       label: "Sucursal",
       align: "left" as const,
-      renderExpanded: (val: any) => <span className="pl-6 font-medium">{val}</span>,
+      renderExpanded: (val: any) => <span>{val}</span>,
     },
     {
       key: "costoTotal",
@@ -269,7 +275,7 @@ export default function Costos({
         }
         return (
           <div 
-            className="cursor-pointer hover:bg-secondary-100 px-2 py-1 rounded transition-colors"
+            className="cursor-pointer hover:bg-secondary-300 px-2 py-1 rounded transition-colors"
             onDoubleClick={(e) => {
               e.stopPropagation();
               setEditingCell(row.name);
@@ -303,7 +309,7 @@ export default function Costos({
       key: "name",
       label: "Sucursal",
       align: "left" as const,
-      renderExpanded: (val: any) => <span className="pl-6 font-medium">{val}</span>,
+      renderExpanded: (val: any) => <span>{val}</span>,
     },
     {
       key: "costoTotal",
@@ -331,7 +337,7 @@ export default function Costos({
       key: "name",
       label: "Distribuidor",
       align: "left" as const,
-      renderExpanded: (val: any) => <span className="pl-6 font-medium">{val}</span>,
+      renderExpanded: (val: any) => <span>{val}</span>,
     },
     {
       key: "vehiculo",
@@ -390,7 +396,7 @@ export default function Costos({
   return (
     <div className="space-y-6" onClick={() => setActiveSucursal(null)}>
       <Accordion title="Indicadores" defaultOpen={false}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-2">
           {renderIndicators(
             "Costo Total",
             `$${costosData.totalCosto.toLocaleString()}`,
@@ -398,6 +404,10 @@ export default function Costos({
           {renderIndicators(
             "Promedio por Entregada",
             `$${costosData.promedioEntregada.toLocaleString()}`,
+          )}
+          {renderIndicators(
+            isGeneral ? "Promedio por ruta" : "Promedio por distribuidor",
+            `$${costosData.promedioCostoSucursal.toLocaleString()}`,
           )}
         </div>
       </Accordion>

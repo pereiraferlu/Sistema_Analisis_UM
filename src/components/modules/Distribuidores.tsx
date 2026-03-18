@@ -241,8 +241,8 @@ export default function Distribuidores({
       <Accordion title="Indicadores" defaultOpen={false}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
           {renderIndicators(isGeneral ? "Total Sucursales" : "Total Distribuidores", distribuidoresData.length)}
-          {renderIndicators(isGeneral ? "Sucursal Top" : "Distribuidor Top", distribuidoresData[0]?.name || "-")}
-          {renderIndicators(isGeneral ? "Cantidad Total Sucursal Top" : "Total Rutas del Distribuidor Top", isGeneral ? (distribuidoresData[0]?.value.toLocaleString() || "0") : (distribuidoresData[0]?.totalRutas?.toLocaleString() || "0"))}
+          {renderIndicators(isGeneral ? "Sucursal con más rutas" : "Distribuidor con más rutas", distribuidoresData[0]?.name || "-")}
+          {renderIndicators(isGeneral ? "Cantidad de la sucursal con más rutas" : "Cantidad del distribuidor con más rutas", isGeneral ? (distribuidoresData[0]?.value.toLocaleString() || "0") : (distribuidoresData[0]?.totalRutas?.toLocaleString() || "0"))}
         </div>
       </Accordion>
 

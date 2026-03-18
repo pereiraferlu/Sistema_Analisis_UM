@@ -153,14 +153,15 @@ export default function Piezas({
   }, [data, selectedVehicles]);
 
   const piezasData = useMemo(() => {
-    const map = new Map<string, { total: number; entregadas: number; noEntregadas: number; bultosEntregados: number; bultosNoEntregados: number }>();
+    const map = new Map<string, { total: number; bultosTotal: number; entregadas: number; noEntregadas: number; bultosEntregados: number; bultosNoEntregados: number }>();
     filteredData.forEach((d) => {
       const key = isGeneral ? d.sucursal : d.distribuidor;
       if (!map.has(key)) {
-        map.set(key, { total: 0, entregadas: 0, noEntregadas: 0, bultosEntregados: 0, bultosNoEntregados: 0 });
+        map.set(key, { total: 0, bultosTotal: 0, entregadas: 0, noEntregadas: 0, bultosEntregados: 0, bultosNoEntregados: 0 });
       }
       const obj = map.get(key)!;
       obj.total += d.piezasTotal;
+      obj.bultosTotal += d.bultosTotal || 0;
       obj.entregadas += d.piezasEntregadas;
       obj.noEntregadas += d.piezasNoEntregadas;
       obj.bultosEntregados += d.bultosEntregados || 0;
@@ -171,9 +172,10 @@ export default function Piezas({
 
     return Array.from(map.entries())
       .map(([name, obj]) => ({
-        name: isGeneral ? name : getShortName(name, allNames),
+        name: name,
         originalName: name,
         total: obj.total,
+        bultosTotal: obj.bultosTotal,
         entregadas: obj.entregadas,
         noEntregadas: obj.noEntregadas,
         bultosEntregados: obj.bultosEntregados,
@@ -225,6 +227,7 @@ export default function Piezas({
 
   const totalEntregadas = piezasData.reduce((acc, curr) => acc + curr.entregadas, 0);
   const totalNoEntregadas = piezasData.reduce((acc, curr) => acc + curr.noEntregadas, 0);
+  const totalBultos = piezasData.reduce((acc, curr) => acc + curr.bultosTotal, 0);
   const totalBultosEntregados = piezasData.reduce((acc, curr) => acc + curr.bultosEntregados, 0);
   const totalBultosNoEntregados = piezasData.reduce((acc, curr) => acc + curr.bultosNoEntregados, 0);
 
@@ -255,7 +258,7 @@ export default function Piezas({
 
     return Array.from(map.entries())
       .map(([name, obj]) => ({
-        name: isGeneral ? name : getShortName(name, allNames),
+        name: name,
         originalName: name,
         total: obj.total,
         conNovedad: obj.conNovedad,
@@ -283,39 +286,46 @@ export default function Piezas({
 
   const getSubRowsPiezas = (row: any) => {
     const entityData = filteredData.filter(d => (isGeneral ? d.sucursal : d.distribuidor) === row.originalName);
-    const dateMap = new Map<string, any>();
+    const subRowsMap = new Map<string, any>();
+    
     entityData.forEach(d => {
       if (!d.fecha) return;
-      if (!dateMap.has(d.fecha)) {
-        dateMap.set(d.fecha, {
-          name: d.fecha,
+      // If general, group by fecha only. If sucursal, group by both.
+      const key = isGeneral ? d.fecha : `${d.fecha}-${d.hojaRuta || 'N/A'}`;
+      if (!subRowsMap.has(key)) {
+        subRowsMap.set(key, {
+          name: isGeneral ? d.fecha : `${d.fecha} - ${d.hojaRuta || 'N/A'}`,
           total: 0,
+          bultosTotal: 0,
           entregadas: 0,
           noEntregadas: 0,
           bultosEntregados: 0,
           bultosNoEntregados: 0,
         });
       }
-      const obj = dateMap.get(d.fecha);
+      const obj = subRowsMap.get(key);
       obj.total += d.piezasTotal;
+      obj.bultosTotal += d.bultosTotal || 0;
       obj.entregadas += d.piezasEntregadas;
       obj.noEntregadas += d.piezasNoEntregadas;
       obj.bultosEntregados += d.bultosEntregados || 0;
       obj.bultosNoEntregados += d.bultosDevueltos || 0;
     });
-    return Array.from(dateMap.values()).map(obj => ({
+
+    return Array.from(subRowsMap.values()).map(obj => ({
       ...obj,
       efectividad: obj.total > 0 ? (obj.entregadas / obj.total) * 100 : 0
     })).sort((a, b) => {
-      const [dayA, monthA, yearA] = a.name.split("/");
-      const [dayB, monthB, yearB] = b.name.split("/");
+      const [dayA, monthA, yearA] = a.name.split(" ")[0].split("/");
+      const [dayB, monthB, yearB] = b.name.split(" ")[0].split("/");
       return new Date(+yearA, +monthA - 1, +dayA).getTime() - new Date(+yearB, +monthB - 1, +dayB).getTime();
     });
   };
 
   const columns = [
-    { key: "name", label: isGeneral ? "Sucursal" : "Distribuidor", align: "left" as const, renderExpanded: (val: any) => <span className="pl-6 font-medium">{val}</span> },
+    { key: "name", label: isGeneral ? "Sucursal" : "Distribuidor", align: "left" as const, renderExpanded: (val: any) => <span>{val}</span> },
     { key: "total", label: "Total Piezas", align: "center" as const, renderExpanded: (val: any) => val },
+    { key: "bultosTotal", label: "Total Bultos", align: "center" as const, renderExpanded: (val: any) => val },
     { key: "entregadas", label: "Piezas Entregadas", align: "center" as const, renderExpanded: (val: any) => val },
     { key: "noEntregadas", label: "Piezas No Entregadas", align: "center" as const, renderExpanded: (val: any) => val },
     { key: "bultosEntregados", label: "Bultos Entregados", align: "center" as const, renderExpanded: (val: any) => val },
@@ -324,7 +334,7 @@ export default function Piezas({
   ];
 
   const novedadesColumns = [
-    { key: "name", label: isGeneral ? "Sucursal" : "Distribuidor", align: "left" as const, renderExpanded: (val: any) => <span className="pl-6 font-medium">{val}</span> },
+    { key: "name", label: isGeneral ? "Sucursal" : "Distribuidor", align: "left" as const, renderExpanded: (val: any) => <span>{val}</span> },
     { key: "total", label: "Total Piezas", align: "center" as const, renderExpanded: (val: any) => val },
     { key: "conNovedad", label: "Con Novedad", align: "center" as const, renderExpanded: (val: any) => val },
     { key: "sinNovedad", label: "Sin Novedad", align: "center" as const, renderExpanded: (val: any) => val },
@@ -337,8 +347,9 @@ export default function Piezas({
   return (
     <div className="space-y-6" onClick={() => setSelectedItem(null)}>
       <Accordion title="Indicadores" defaultOpen={false}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           {renderIndicators("Total Piezas", totalPiezas)}
+          {renderIndicators("Total Bultos", totalBultos)}
           {renderIndicators("Entregadas", totalEntregadas)}
           {renderIndicators("No Entregadas", totalNoEntregadas)}
           {renderIndicators("% Efectividad", `${((totalEntregadas / (totalPiezas || 1)) * 100).toFixed(0)}%`)}

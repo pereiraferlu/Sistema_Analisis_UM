@@ -212,13 +212,9 @@ export default function Fechas({
     { key: "name", label: "Fecha", align: "left" as const },
     { key: "dayOfWeek", label: "Día", align: "left" as const },
     { key: "rutas", label: "Total Rutas", align: "center" as const },
-    { key: "entregadas", label: "Entregadas", align: "center" as const },
-    { key: "noEntregadas", label: "No Entregadas", align: "center" as const },
-    {
-      key: "activeEntities",
-      label: "Distribuidores Activos",
-      align: "center" as const,
-    },
+    { key: "value", label: "Total Piezas", align: "center" as const },
+    { key: "entregadas", label: "Piezas Entregadas", align: "center" as const },
+    { key: "noEntregadas", label: "Piezas No Entregadas", align: "center" as const },
     {
       key: "efectividad",
       label: "% Eficiencia",
