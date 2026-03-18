@@ -24,6 +24,12 @@ export default function App() {
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [presupuestos, setPresupuestos] = useState<Record<string, number>>({});
   const [pendingPresupuestos, setPendingPresupuestos] = useState<Record<string, number> | undefined>();
+  
+  // Store raw data for re-validation
+  const [lastRawData, setLastRawData] = useState<LogisticsData[]>([]);
+  const [lastRawTotals, setLastRawTotals] = useState<{ piezas: number; bultos: number } | undefined>();
+  const [lastRawPresupuestos, setLastRawPresupuestos] = useState<Record<string, number> | undefined>();
+  const [lastConfirmedData, setLastConfirmedData] = useState<LogisticsData[]>([]);
 
   const handleDataLoaded = (
     parsedData: LogisticsData[],
@@ -32,9 +38,12 @@ export default function App() {
     presupuestosMap?: Record<string, number>
   ) => {
     setPendingData(parsedData);
+    setLastRawData(parsedData); // Save raw data
     setFileName(name);
     setTotals(parsedTotals);
+    setLastRawTotals(parsedTotals); // Save raw totals
     setPendingPresupuestos(presupuestosMap);
+    setLastRawPresupuestos(presupuestosMap); // Save raw budgets
     setShowModal(true);
   };
 
@@ -45,6 +54,7 @@ export default function App() {
     idsToRemove?: string[]
   ) => {
     setShowModal(false);
+    setLastConfirmedData(updatedData); // Track what was just added
     setData((prev) => {
       let filteredPrev = prev;
       if (idsToRemove && idsToRemove.length > 0) {
@@ -83,11 +93,31 @@ export default function App() {
     setData([]);
     setFileName("");
     setPresupuestos({});
+    setLastRawData([]);
+    setLastRawTotals(undefined);
+    setLastRawPresupuestos(undefined);
+    setLastConfirmedData([]);
   };
 
   const handlePresupuestoChange = (sucursal: string, value: string) => {
     const num = parseFloat(value);
     setPresupuestos(prev => ({ ...prev, [sucursal]: isNaN(num) ? 0 : num }));
+  };
+
+  const handleRevalidate = () => {
+    if (lastRawData.length === 0) return;
+
+    // Get IDs of the data as it was confirmed to remove it from current state
+    const confirmedIds = new Set(lastConfirmedData.map(d => getRouteId(d)));
+    
+    setPendingData(lastRawData);
+    setTotals(lastRawTotals);
+    setPendingPresupuestos(lastRawPresupuestos);
+    
+    // Remove the data that was last confirmed so we can re-process its original version
+    setData(prev => prev.filter(d => !confirmedIds.has(getRouteId(d))));
+    
+    setShowModal(true);
   };
 
   if (isDashboardActive) {
@@ -98,6 +128,7 @@ export default function App() {
           fileName={fileName} 
           onReset={handleReset} 
           onAddFile={() => setIsAddingFile(true)}
+          onRevalidate={handleRevalidate}
           presupuestos={presupuestos}
           onPresupuestoChange={handlePresupuestoChange}
         />
