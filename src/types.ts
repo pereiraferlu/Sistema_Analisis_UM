@@ -11,10 +11,12 @@ export interface LogisticsData {
   zona: string; // ZONAS (CAP-INT)
   piezasEntregadas: number; // CANTIDAD DE PIEZAS ENTREGAS
   piezasNoEntregadas: number; // CANTIDAD DE NO ENTREGAS
+  piezasSinNovedad: number; // PIEZAS SIN NOVEDAD (Usually same as piezasEntregadas)
   visitadasNovedad: number; // VISITADAS CON NOVEDAD
   noVisitadas: number; // NO VISITADAS
   bultosEntregados: number; // BULTOS ENTREGADOS
   bultosDevueltos: number; // BULTOS DEVUELTOS
+  bultosNoEntregados: number; // BULTOS NO ENTREGADOS (Usually same as bultosDevueltos)
   costoTotal: number; // COSTO TOTAL - JORNAL O PIEZA
   presupuesto?: number; // PRESUPUESTO ESTABLECIDO
   observaciones: string; // OBSERVACIONES

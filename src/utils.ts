@@ -42,10 +42,12 @@ export const getDifferences = (a: LogisticsData, b: LogisticsData) => {
   check("costoTotal", "Costo", a.costoTotal, b.costoTotal, true);
   check("piezasEntregadas", "Piezas Entregadas", a.piezasEntregadas, b.piezasEntregadas, true);
   check("piezasNoEntregadas", "Piezas No Entregadas", a.piezasNoEntregadas, b.piezasNoEntregadas, true);
+  check("piezasSinNovedad", "Piezas Sin Novedad", a.piezasSinNovedad, b.piezasSinNovedad, true);
   check("visitadasNovedad", "Visitadas Novedad", a.visitadasNovedad, b.visitadasNovedad, true);
   check("noVisitadas", "No Visitadas", a.noVisitadas, b.noVisitadas, true);
   check("bultosEntregados", "Bultos Entregados", a.bultosEntregados, b.bultosEntregados, true);
   check("bultosDevueltos", "Bultos Devueltos", a.bultosDevueltos, b.bultosDevueltos, true);
+  check("bultosNoEntregados", "Bultos No Entregados", a.bultosNoEntregados, b.bultosNoEntregados, true);
   check("retiros", "Retiros", a.retiros, b.retiros, true);
   check("palets", "Palets", a.palets, b.palets, true);
   check("peso", "Peso", a.peso, b.peso, true);
@@ -71,20 +73,28 @@ export const normalizeHojaRuta = (val: any) => {
 };
 
 export const normalizeZone = (zone: string) => {
-  if (!zone) return "Desconocida";
+  if (!zone || zone === "SIN_ZONA") return null;
   const normalized = normalizeString(zone);
   
-  // Check for Capital and its abbreviations
-  if (normalized.includes("CAPITAL") || normalized.includes("CAP") || 
-      normalized.includes("CAPT") || normalized.includes("CAPTAL")) {
-    return "CAPITAL";
-  }
+  // Check for Capital and its abbreviations with more precision
+  const isCapital = normalized === "CAPITAL" || 
+                    normalized === "CAP" || 
+                    normalized === "CAPT" || 
+                    normalized === "CAPTAL" ||
+                    normalized.startsWith("CAPITAL ") ||
+                    normalized.includes(" CAPITAL ");
+                    
+  if (isCapital) return "CAPITAL";
   
-  // Check for Interior and its abbreviations
-  if (normalized.includes("INTERIOR") || normalized.includes("INT") || 
-      normalized.includes("INTR") || normalized.includes("INTER")) {
-    return "INTERIOR";
-  }
+  // Check for Interior and its abbreviations with more precision
+  const isInterior = normalized === "INTERIOR" || 
+                     normalized === "INT" || 
+                     normalized === "INTR" || 
+                     normalized === "INTER" ||
+                     normalized.startsWith("INTERIOR ") ||
+                     normalized.includes(" INTERIOR ");
+
+  if (isInterior) return "INTERIOR";
   
   return null; // Return null if not recognized as one of the two
 };
