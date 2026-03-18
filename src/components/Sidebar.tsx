@@ -14,6 +14,7 @@ interface SidebarProps {
   onClose: () => void;
   onExportReport: () => void;
   onAddRoutes: () => void;
+  onRevalidate: () => void;
   onReset: () => void;
   onSaveAndExport: () => void;
   isExporting: boolean;
@@ -25,6 +26,7 @@ export default function Sidebar({
   onClose,
   onExportReport,
   onAddRoutes,
+  onRevalidate,
   onReset,
   onSaveAndExport,
   isExporting,
@@ -88,6 +90,19 @@ export default function Sidebar({
                   <PlusCircle className="w-4 h-4 text-white" />
                 </div>
                 <span className="text-sm font-medium text-left">Agregar Rutas</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onRevalidate();
+                  onClose();
+                }}
+                className="w-full flex items-center p-3 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all group cursor-pointer"
+              >
+                <div className="p-2 bg-indigo-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                  <FileSpreadsheet className="w-4 h-4 text-white" />
+                </div>
+                <span className="text-sm font-medium text-left">Validación de Datos</span>
               </button>
 
               <button

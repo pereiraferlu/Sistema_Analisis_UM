@@ -39,10 +39,36 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
   
   if (v.includes("moto")) return "Moto";
   if (v.includes("auto")) return "Auto";
+  
+  // Primero buscamos coincidencias de "Grande"
+  if (
+    v.includes("camioneta grande") || 
+    v.includes("sprinter") || 
+    v.includes("tipo grande") || 
+    v.includes("peugeot boxer") || 
+    v.includes("citroen jumper") || 
+    v.includes("utilitario grande")
+  ) {
+    return "Utilitario Grande";
+  }
+
+  // Luego buscamos coincidencias de "Chica" o genéricas de "Camioneta"
+  if (
+    v.includes("camioneta") || 
+    v.includes("tipo pequeño") || 
+    v.includes("utilitario pequeño") || 
+    v.includes("utilitario chico") || 
+    v.includes("kangoo") || 
+    v.includes("partner") || 
+    v.includes("fiorino") ||
+    v.includes("utilitario")
+  ) {
+    return "Utilitario Chico";
+  }
+
+  // Camiones (se busca después para no confundir con camioneta)
   if (v.includes("dayli") || v.includes("daily") || v.includes("camion") || v.includes("camiòn") || v.includes("camión")) return "Camión";
-  if (v.includes("sprinter") || v.includes("tipo grande") || v.includes("peugeot boxer") || v.includes("citroen jumper") || v.includes("utilitario grande")) return "Utilitario Grande";
-  if (v.includes("tipo pequeño") || v.includes("utilitario pequeño") || v.includes("utilitario chico") || v.includes("kangoo") || v.includes("partner") || v.includes("fiorino")) return "Utilitario Chico";
-  if (v.includes("camioneta") || v.includes("utilitario")) return "Utilitario Chico";
+  
   if (v.includes("local comercial") || v.includes("local")) return "Local Comercial";
   
   if (!v) {
@@ -225,16 +251,16 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
                   return undefined;
                 };
 
-                const piezasTotal = Number(getVal(["piezasTotal", "piezas Total"])) || 0;
-                const bultosTotal = Number(getVal(["bultosTotal", "bultos Total"])) || 0;
-                const distribuidor = normalizeString(getVal(["distribuidor"]));
+                const piezasTotal = Number(getVal(["piezasTotal", "piezas Total", "cantidad de id piezas a gestionar", "piezas a gestionar"])) || 0;
+                const bultosTotal = Number(getVal(["bultosTotal", "bultos Total", "cantidad de bultos a gestionar", "bultos a gestionar"])) || 0;
+                const distribuidor = normalizeString(getVal(["distribuidor", "nombre completo del movil", "movil"]));
                 if (!distribuidor) continue;
 
                 totalPiezasExcel += piezasTotal;
                 totalBultosExcel += bultosTotal;
 
                 let fecha = "";
-                const rawFecha = getVal(["fecha"]);
+                const rawFecha = getVal(["fecha", "fecha de gestion"]);
                 if (rawFecha) {
                   if (rawFecha instanceof Date) {
                     fecha = rawFecha.toLocaleDateString("es-AR");
@@ -243,26 +269,26 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
                   }
                 }
 
-                const obs = String(getVal(["observaciones"]) || "");
+                const obs = String(getVal(["observaciones", "obs", "comentarios"]) || "");
 
                 item = {
                   fecha: fecha,
                   distribuidor: distribuidor,
-                  vehiculo: parseVehiculo(String(getVal(["vehiculo"]) || ""), obs),
-                  hojaRuta: normalizeHojaRuta(getVal(["hojaRuta", "hoja de ruta"])),
+                  vehiculo: parseVehiculo(String(getVal(["vehiculo", "tipo de vehiculo marca", "tipo vehiculo"]) || ""), obs),
+                  hojaRuta: normalizeHojaRuta(getVal(["hojaRuta", "hoja de ruta", "hojas de ruta numero", "ruta"])),
                   retiros: Number(getVal(["retiros"])) || 0,
                   piezasTotal: piezasTotal,
                   bultosTotal: bultosTotal,
                   palets: Number(getVal(["palets"])) || 0,
-                  peso: Number(getVal(["peso"])) || 0,
-                  zona: parseZona(String(getVal(["zona"]) || ""), obs),
-                  piezasEntregadas: Number(getVal(["piezasEntregadas", "piezas Entregadas"])) || 0,
-                  piezasNoEntregadas: Number(getVal(["piezasNoEntregadas", "piezas No Entregadas"])) || 0,
-                  visitadasNovedad: Number(getVal(["visitadasNovedad", "visitadas Novedad"])) || 0,
+                  peso: Number(getVal(["peso", "kg transportado", "kg"])) || 0,
+                  zona: parseZona(String(getVal(["zona", "zonas cap-int", "zonas"]) || ""), obs),
+                  piezasEntregadas: Number(getVal(["piezasEntregadas", "piezas Entregadas", "cantidad de piezas entregas", "entregadas"])) || 0,
+                  piezasNoEntregadas: Number(getVal(["piezasNoEntregadas", "piezas No Entregadas", "cantidad de no entregas", "no entregas"])) || 0,
+                  visitadasNovedad: Number(getVal(["visitadasNovedad", "visitadas Novedad", "visitadas con novedad"])) || 0,
                   noVisitadas: Number(getVal(["noVisitadas"])) || 0,
-                  bultosEntregados: Number(getVal(["bultosEntregados"])) || 0,
-                  bultosDevueltos: Number(getVal(["bultosDevueltos"])) || 0,
-                  costoTotal: Number(getVal(["costoTotal"])) || 0,
+                  bultosEntregados: Number(getVal(["bultosEntregados", "bultos entregado"])) || 0,
+                  bultosDevueltos: Number(getVal(["bultosDevueltos", "bultos devueltos"])) || 0,
+                  costoTotal: Number(getVal(["costoTotal", "costo total jornal o pieza", "costo"])) || 0,
                   presupuesto: Number(getVal(["presupuesto"])) || presupuestosMap[assignedSucursal],
                   observaciones: obs,
                   sucursal: assignedSucursal,

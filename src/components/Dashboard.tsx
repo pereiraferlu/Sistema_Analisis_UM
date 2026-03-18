@@ -40,6 +40,7 @@ interface DashboardProps {
   fileName: string;
   onReset: () => void;
   onAddFile?: () => void;
+  onRevalidate?: () => void;
   presupuestos: Record<string, number>;
   onPresupuestoChange: (sucursal: string, value: string) => void;
 }
@@ -53,7 +54,7 @@ const COLORS = [
   "#ec4899",
 ];
 
-export default function Dashboard({ data, fileName, onReset, onAddFile, presupuestos, onPresupuestoChange }: DashboardProps) {
+export default function Dashboard({ data, fileName, onReset, onAddFile, onRevalidate, presupuestos, onPresupuestoChange }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("Distribuidores");
   const [selectedSucursal, setSelectedSucursal] = useState<string>("General");
   const [isExporting, setIsExporting] = useState(false);
@@ -192,7 +193,7 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
       typeof value === "string" &&
       isNaN(Number(value.replace(/[^0-9.-]+/g, "")));
     return (
-      <div className="bg-secondary-100 hover:bg-secondary-200 hover:shadow-md transform hover:-translate-y-1 rounded-xl p-6 flex flex-col justify-center transition-all duration-300 cursor-pointer">
+      <div className="bg-secondary-100 hover:bg-secondary-300 hover:shadow-xl transform hover:-translate-y-2 rounded-xl p-6 flex flex-col justify-center transition-all duration-300 cursor-pointer border border-transparent hover:border-primary-200">
         <p className="text-sm font-medium text-secondary-700 uppercase tracking-wider">
           {title}
         </p>
@@ -271,6 +272,7 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, presupue
         onClose={() => setIsSidebarOpen(false)}
         onExportReport={handleExport}
         onAddRoutes={onAddFile || (() => {})}
+        onRevalidate={onRevalidate || (() => {})}
         onReset={onReset}
         onSaveAndExport={handleSaveAndExport}
         isExporting={isExporting}

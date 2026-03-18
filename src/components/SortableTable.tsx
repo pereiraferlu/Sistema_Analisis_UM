@@ -14,9 +14,10 @@ interface SortableTableProps {
   data: any[];
   customTotals?: Record<string, any>;
   getSubRows?: (row: any) => any[];
+  subColumns?: Column[];
 }
 
-export default function SortableTable({ columns, data, customTotals, getSubRows }: SortableTableProps) {
+export default function SortableTable({ columns, data, customTotals, getSubRows, subColumns }: SortableTableProps) {
   const [sortConfig, setSortConfig] = useState<{
     key: string;
     direction: "asc" | "desc";
@@ -234,20 +235,20 @@ export default function SortableTable({ columns, data, customTotals, getSubRows 
             return (
             <React.Fragment key={idx}>
               <tr 
-                className={`transition-colors ${
+                className={`transition-all duration-200 relative ${
                   isExpanded 
-                    ? 'bg-secondary-100 cursor-pointer font-semibold text-secondary-900' 
+                    ? 'bg-primary-50 ring-2 ring-primary-600 ring-inset z-10 font-semibold text-primary-900' 
                     : getSubRows 
-                      ? 'cursor-pointer hover:bg-secondary-100' 
-                      : 'hover:bg-secondary-50'
+                      ? 'cursor-pointer hover:bg-secondary-300' 
+                      : 'hover:bg-secondary-300'
                 }`}
                 onClick={() => getSubRows && toggleRow(idx)}
               >
                 {columns.map((col, colIdx) => (
                   <td
                     key={col.key}
-                    className={`px-3 py-2 whitespace-nowrap text-xs truncate ${
-                      !isExpanded ? 'text-secondary-700' : ''
+                    className={`px-3 py-2.5 whitespace-nowrap text-xs truncate ${
+                      isExpanded ? 'text-primary-900' : 'text-secondary-700'
                     } ${
                       col.align === "left" || (colIdx === 0 && !col.align)
                         ? "text-left"
@@ -270,11 +271,20 @@ export default function SortableTable({ columns, data, customTotals, getSubRows 
                 ))}
               </tr>
               {isExpanded && getSubRows(row).map((subRow, subIdx) => (
-                <tr key={`sub-${idx}-${subIdx}`} className="bg-secondary-50 hover:bg-white transition-colors group cursor-default">
+                <tr 
+                  key={`sub-${idx}-${subIdx}`} 
+                  className="bg-secondary-50/50 transition-colors font-medium text-secondary-900 relative hover:bg-secondary-200"
+                >
                   {columns.map((col, colIdx) => (
                     <td
                       key={col.key}
-                      className={`px-3 py-2 whitespace-nowrap text-xs text-secondary-600 group-hover:text-secondary-900 truncate ${
+                      className={`py-1.5 whitespace-nowrap text-[11px] text-secondary-600 border-b border-secondary-100/50 ${
+                        colIdx === 0 
+                          ? "pl-10 pr-3 border-l-4 border-primary-300" 
+                          : colIdx === columns.length - 1
+                            ? "pl-3 pr-10"
+                            : "px-3"
+                      } ${
                         col.align === "left" || (colIdx === 0 && !col.align)
                           ? "text-left"
                           : col.align === "right"
@@ -285,11 +295,11 @@ export default function SortableTable({ columns, data, customTotals, getSubRows 
                       {col.align === "center" ? (
                         <div className="flex justify-center">
                           <div className="text-right min-w-[60px]">
-                            {col.renderExpanded ? col.renderExpanded(subRow[col.key], subRow) : subRow[col.key]}
+                            {col.renderExpanded ? col.renderExpanded(subRow[col.key], subRow) : (col.render ? col.render(subRow[col.key], subRow) : subRow[col.key])}
                           </div>
                         </div>
                       ) : (
-                        col.renderExpanded ? col.renderExpanded(subRow[col.key], subRow) : subRow[col.key]
+                        col.renderExpanded ? col.renderExpanded(subRow[col.key], subRow) : (col.render ? col.render(subRow[col.key], subRow) : subRow[col.key])
                       )}
                     </td>
                   ))}

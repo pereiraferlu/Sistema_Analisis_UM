@@ -71,37 +71,83 @@ export default function ValidationModal({
     });
   }, [pendingPresupuestos, existingPresupuestos, selectedSucursal]);
 
-  const [step, setStep] = useState<'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
-    needsMapping ? 'mapping' : 
-    isPending ? 'branch_selection' : 
-    hasDifferentPresupuestos ? 'budget_validation' : 
-    'conflicts'
+  const differentBudgetsCount = useMemo(() => {
+    return Object.entries(pendingPresupuestos || {})
+      .filter(([suc, amount]) => {
+        const branchName = suc === "PENDING_SUCURSAL" ? selectedSucursal : suc;
+        const normalizedBranch = normalizeString(branchName);
+        const isKnown = KNOWN_BRANCHES.some(kb => normalizeString(kb) === normalizedBranch);
+        if (!isKnown) return false;
+        
+        const existingAmount = existingPresupuestos?.[branchName];
+        return existingAmount === undefined || existingAmount !== amount;
+      }).length;
+  }, [pendingPresupuestos, selectedSucursal, existingPresupuestos]);
+
+  const [step, setStep] = useState<'quantity_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
+    'quantity_validation'
   );
+  const [stepHistory, setStepHistory] = useState<string[]>([]);
 
   const [vehicleMapping, setVehicleMapping] = useState<Record<string, string>>({});
   const [zoneMapping, setZoneMapping] = useState<Record<string, string>>({});
+  const [corrections, setCorrections] = useState<Record<number, Partial<LogisticsData>>>({});
+  const [excludedIndices, setExcludedIndices] = useState<Set<number>>(new Set());
+
+  const mappedData = useMemo<LogisticsData[]>(() => {
+    return data.map((d, index) => {
+      const correction = corrections[index] || {};
+      return {
+        ...d,
+        ...correction,
+        vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
+        zona: normalizeZone(d.zona) || zoneMapping[d.zona] || d.zona,
+      } as LogisticsData;
+    });
+  }, [data, vehicleMapping, zoneMapping, corrections]);
+
+  const initialDiscrepancyIndices = useMemo(() => {
+    return data.map((d, index) => {
+      const hasQuantityError = (d.piezasEntregadas + d.piezasNoEntregadas !== d.piezasTotal) ||
+                               (d.bultosEntregados + d.bultosDevueltos !== d.bultosTotal);
+      const hasBultosPiezasError = d.bultosTotal < d.piezasTotal || 
+                                   d.bultosEntregados < d.piezasEntregadas || 
+                                   d.bultosDevueltos < d.piezasNoEntregadas;
+      return (hasQuantityError || hasBultosPiezasError) ? index : -1;
+    }).filter(idx => idx !== -1);
+  }, [data]);
+
+  const quantityDiscrepancies = useMemo(() => {
+    return initialDiscrepancyIndices.map(index => ({
+      data: mappedData[index],
+      index
+    }));
+  }, [initialDiscrepancyIndices, mappedData]);
+
+  const correctedPiezasCount = useMemo(() => {
+    return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.piezasTotal !== undefined || c.piezasEntregadas !== undefined || c.piezasNoEntregadas !== undefined).length;
+  }, [corrections]);
+
+  const correctedBultosCount = useMemo(() => {
+    return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.bultosTotal !== undefined || c.bultosEntregados !== undefined || c.bultosDevueltos !== undefined).length;
+  }, [corrections]);
 
   useEffect(() => {
-    const initialMapping: Record<string, string> = {};
-    unknownVehicles.forEach(v => {
-      initialMapping[v] = KNOWN_VEHICLES[0];
-    });
-    setVehicleMapping(initialMapping);
-
-    const initialZoneMapping: Record<string, string> = {};
-    unknownZones.forEach(z => {
-      initialZoneMapping[z] = "CAPITAL";
-    });
-    setZoneMapping(initialZoneMapping);
-  }, [unknownVehicles, unknownZones]);
-
-  const mappedData = useMemo(() => {
-    return data.map(d => ({
-      ...d,
-      vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
-      zona: normalizeZone(d.zona) || zoneMapping[d.zona] || d.zona,
-    }));
-  }, [data, vehicleMapping, zoneMapping]);
+    // Initial step determination
+    if (isPending) {
+      setStep('branch_selection');
+    } else if (quantityDiscrepancies.length > 0) {
+      setStep('quantity_validation');
+    } else if (needsMapping) {
+      setStep('mapping');
+    } else if (hasDifferentPresupuestos) {
+      setStep('budget_validation');
+    } else if (conflicts.length > 0) {
+      setStep('conflicts');
+    } else {
+      setStep('validation');
+    }
+  }, []); // Only on mount to set initial step
 
   const sucursalesEnArchivo = Array.from(new Set(mappedData.map(d => d.sucursal).filter(s => s !== "PENDING_SUCURSAL")));
   
@@ -140,10 +186,27 @@ export default function ValidationModal({
     return { text: "No encontrados", color: "text-secondary-500" };
   }, [existingPresupuestos, pendingPresupuestos, budgetResolutions, hasDifferentPresupuestos, selectedSucursal]);
 
-  const unknownZonesWithSucursal = unknownZones.map(z => {
-    const sucursales = Array.from(new Set(data.filter(d => d.zona === z).map(d => d.sucursal)));
-    return { zona: z, sucursales };
-  });
+  const unknownZonesWithDetails = useMemo(() => {
+    return unknownZones.map(z => {
+      const observations = data.filter((d, idx) => d.zona === z && !excludedIndices.has(idx)).map(d => ({
+        sucursal: d.sucursal === "PENDING_SUCURSAL" ? "Sucursal por definir" : d.sucursal,
+        fecha: d.fecha,
+        hojaRuta: d.hojaRuta
+      }));
+      return { zona: z, observations };
+    }).filter(z => z.observations.length > 0);
+  }, [unknownZones, data, excludedIndices]);
+
+  const unknownVehiclesWithDetails = useMemo(() => {
+    return unknownVehicles.map(v => {
+      const observations = data.filter((d, idx) => d.vehiculo === v && !excludedIndices.has(idx)).map(d => ({
+        sucursal: d.sucursal === "PENDING_SUCURSAL" ? "Sucursal por definir" : d.sucursal,
+        fecha: d.fecha,
+        hojaRuta: d.hojaRuta
+      }));
+      return { vehiculo: v, observations };
+    }).filter(v => v.observations.length > 0);
+  }, [unknownVehicles, data, excludedIndices]);
 
   // Duplicate and Conflict detection
   const { duplicates, conflicts, newRoutes } = useMemo(() => {
@@ -202,6 +265,8 @@ export default function ValidationModal({
   const uniqueSucursales = isPending ? 1 : new Set(mappedData.map((d) => d.sucursal)).size;
   const totalPiezas =
     totals?.piezas ?? mappedData.reduce((acc, curr) => acc + curr.piezasTotal, 0);
+  const totalBultos =
+    totals?.bultos ?? mappedData.reduce((acc, curr) => acc + curr.bultosTotal, 0);
 
   useEffect(() => {
     if (step === 'budget_validation') {
@@ -217,48 +282,56 @@ export default function ValidationModal({
     }
   }, [pendingPresupuestos, step]);
 
+  const totalUnknownVehiclesRoutes = useMemo(() => {
+    return unknownVehiclesWithDetails.reduce((acc, v) => acc + v.observations.length, 0);
+  }, [unknownVehiclesWithDetails]);
+
+  const totalUnknownZonesRoutes = useMemo(() => {
+    return unknownZonesWithDetails.reduce((acc, z) => acc + z.observations.length, 0);
+  }, [unknownZonesWithDetails]);
+
   const handleConfirm = () => {
-    if (step === 'mapping') {
-      if (isPending) {
-        setStep('branch_selection');
-      } else if (hasDifferentPresupuestos) {
-        setStep('budget_validation');
-      } else if (conflicts.length > 0) {
-        setStep('conflicts');
-      } else {
-        setStep('validation');
+    const nextStep = (currentStep: string): any => {
+      if (currentStep === 'branch_selection') {
+        if (quantityDiscrepancies.length > 0) return 'quantity_validation';
+        if (needsMapping) return 'mapping';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
       }
+      if (currentStep === 'quantity_validation') {
+        if (needsMapping) return 'mapping';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'mapping') {
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'budget_validation') {
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'conflicts') {
+        return 'validation';
+      }
+      return null;
+    };
+
+    const next = nextStep(step);
+    if (next) {
+      setStepHistory(prev => [...prev, step]);
+      setStep(next);
       return;
     }
 
-    if (step === 'branch_selection') {
-      if (hasDifferentPresupuestos) {
-        setStep('budget_validation');
-      } else if (conflicts.length > 0) {
-        setStep('conflicts');
-      } else {
-        setStep('validation');
-      }
-      return;
-    }
-
-    if (step === 'budget_validation') {
-      if (conflicts.length > 0) {
-        setStep('conflicts');
-      } else {
-        setStep('validation');
-      }
-      return;
-    }
-    
-    if (step === 'conflicts') {
-      setStep('validation');
-      return;
-    }
+    const finalData = mappedData.filter((_, idx) => !excludedIndices.has(idx));
 
     const dataToAdd = [
-      ...newRoutes,
-      ...conflicts.filter(c => conflictResolution[c.id] === 'replace').map(c => c.incoming)
+      ...newRoutes.filter(r => finalData.some(fd => getRouteId(fd) === getRouteId(r))),
+      ...conflicts.filter(c => conflictResolution[c.id] === 'replace' && finalData.some(fd => getRouteId(fd) === c.id)).map(c => c.incoming)
     ].map((d) => ({
       ...d,
       vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
@@ -306,6 +379,15 @@ export default function ValidationModal({
     onConfirm(dataToAdd, finalPresupuestos, true, idsToRemove);
   };
 
+  const handleBack = () => {
+    if (stepHistory.length > 0) {
+      const newHistory = [...stepHistory];
+      const prevStep = newHistory.pop();
+      setStepHistory(newHistory);
+      if (prevStep) setStep(prevStep as any);
+    }
+  };
+
   const replacedRoutes = useMemo(() => {
     return conflicts.filter(c => conflictResolution[c.id] === 'replace');
   }, [conflicts, conflictResolution]);
@@ -330,7 +412,180 @@ export default function ValidationModal({
         </div>
 
         <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
-          {step === 'mapping' ? (
+          {step === 'quantity_validation' ? (
+            <div className="space-y-6">
+              <div className="p-4 bg-danger-50 rounded-xl border border-danger-200">
+                <div className="flex items-center space-x-2 mb-4 text-danger-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold uppercase tracking-wider">Validación de cantidades de piezas y bultos</h3>
+                </div>
+                <p className="text-sm text-danger-800 mb-4">
+                  Se detectaron "{quantityDiscrepancies.length}" discrepancias en las cantidades totales de algunas rutas. Por favor, verifique y corrija los datos:
+                </p>
+                
+                <div className="space-y-4">
+                  {quantityDiscrepancies.map(({ data: d, index }) => {
+                    const piezasDiff = d.piezasTotal !== (d.piezasEntregadas + d.piezasNoEntregadas);
+                    const bultosDiff = d.bultosTotal !== (d.bultosEntregados + d.bultosDevueltos);
+                    const bultosTotalError = d.bultosTotal < d.piezasTotal;
+                    const bultosEntregadosError = d.bultosEntregados < d.piezasEntregadas;
+                    const bultosDevueltosError = d.bultosDevueltos < d.piezasNoEntregadas;
+                    
+                    const piezasSectionError = piezasDiff || bultosEntregadosError || bultosDevueltosError;
+                    const bultosSectionError = bultosDiff || bultosTotalError || bultosEntregadosError || bultosDevueltosError;
+                    
+                    const isExcluded = excludedIndices.has(index);
+                    
+                    return (
+                      <div key={index} className={`p-4 bg-white rounded-xl border shadow-sm space-y-4 transition-opacity ${isExcluded ? 'opacity-50 grayscale border-secondary-200' : 'border-danger-100'}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-secondary-50">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {d.sucursal === "PENDING_SUCURSAL" ? "Sucursal por definir" : d.sucursal}
+                            </span>
+                            <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {d.fecha}
+                            </span>
+                            <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              HDR: {d.hojaRuta}
+                            </span>
+                          </div>
+                          
+                          <label className="flex items-center space-x-2 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={isExcluded}
+                              onChange={() => {
+                                const newExcluded = new Set(excludedIndices);
+                                if (isExcluded) newExcluded.delete(index);
+                                else newExcluded.add(index);
+                                setExcludedIndices(newExcluded);
+                              }}
+                              className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                            />
+                            <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">No incluir ruta</span>
+                          </label>
+                        </div>
+
+                        {!isExcluded && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Piezas Section */}
+                            <div className={`space-y-3 p-3 rounded-lg border ${piezasSectionError ? 'bg-danger-50/30 border-danger-100' : 'bg-secondary-50/30 border-secondary-100'}`}>
+                              <h4 className={`text-[10px] font-bold uppercase tracking-widest ${piezasSectionError ? 'text-danger-600' : 'text-secondary-500'}`}>
+                                Validación de Piezas
+                              </h4>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">Total</label>
+                                  <input
+                                    type="number"
+                                    value={d.piezasTotal}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], piezasTotal: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded font-bold ${piezasDiff ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">Entreg.</label>
+                                  <input
+                                    type="number"
+                                    value={d.piezasEntregadas}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], piezasEntregadas: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded ${bultosEntregadosError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">No Entreg.</label>
+                                  <input
+                                    type="number"
+                                    value={d.piezasNoEntregadas}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], piezasNoEntregadas: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded ${bultosDevueltosError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                              </div>
+                              {piezasDiff && (
+                                <p className="text-[10px] text-danger-600 font-medium">
+                                  Error Suma: {d.piezasTotal} ≠ {d.piezasEntregadas + d.piezasNoEntregadas}
+                                </p>
+                              )}
+                              {(bultosEntregadosError || bultosDevueltosError) && (
+                                <p className="text-[10px] text-danger-600 font-medium">
+                                  Error: Bultos menores a piezas
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Bultos Section */}
+                            <div className={`space-y-3 p-3 rounded-lg border ${bultosSectionError ? 'bg-danger-50/30 border-danger-100' : 'bg-secondary-50/30 border-secondary-100'}`}>
+                              <h4 className={`text-[10px] font-bold uppercase tracking-widest ${bultosSectionError ? 'text-danger-600' : 'text-secondary-500'}`}>
+                                Validación de Bultos
+                              </h4>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">Total</label>
+                                  <input
+                                    type="number"
+                                    value={d.bultosTotal}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], bultosTotal: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded font-bold ${bultosDiff || bultosTotalError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">Entreg.</label>
+                                  <input
+                                    type="number"
+                                    value={d.bultosEntregados}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], bultosEntregados: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded ${bultosEntregadosError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-secondary-500 uppercase">No Entreg.</label>
+                                  <input
+                                    type="number"
+                                    value={d.bultosDevueltos}
+                                    onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                    onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], bultosDevueltos: parseInt(e.target.value) || 0 } }))}
+                                    className={`w-full text-xs p-1.5 border rounded ${bultosDevueltosError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200'}`}
+                                  />
+                                </div>
+                              </div>
+                              {bultosDiff && (
+                                <p className="text-[10px] text-danger-600 font-medium">
+                                  Error Suma: {d.bultosTotal} ≠ {d.bultosEntregados + d.bultosDevueltos}
+                                </p>
+                              )}
+                              {bultosTotalError && (
+                                <p className="text-[10px] text-danger-600 font-medium">
+                                  Error: Bultos totales menores a piezas totales
+                                </p>
+                              )}
+                              {(bultosEntregadosError || bultosDevueltosError) && (
+                                <p className="text-[10px] text-danger-600 font-medium">
+                                  Error: Bultos menores a piezas
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <div className="text-center py-4">
+                <p className="text-sm font-medium text-secondary-600">
+                  Corrija los valores resaltados para que la suma coincida con el total.
+                </p>
+              </div>
+            </div>
+          ) : step === 'mapping' ? (
             <div className="space-y-6">
               {unknownVehicles.length > 0 && (
                 <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
@@ -339,21 +594,37 @@ export default function ValidationModal({
                     <h3 className="font-bold">Vehículos no reconocidos</h3>
                   </div>
                   <p className="text-sm text-amber-800 mb-4">
-                    Se encontraron vehículos que no coinciden con las categorías del sistema. Por favor, asígnelos correctamente:
+                    Se detectaron "{totalUnknownVehiclesRoutes}" rutas con vehículos que no coinciden con las categorías del sistema. Por favor, asígnelos correctamente:
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {unknownVehicles.map(v => (
-                      <div key={v} className="space-y-1">
-                        <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">"{v}"</label>
-                        <select
-                          value={vehicleMapping[v] || KNOWN_VEHICLES[0]}
-                          onChange={(e) => setVehicleMapping(prev => ({ ...prev, [v]: e.target.value }))}
-                          className="w-full text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500"
-                        >
-                          {KNOWN_VEHICLES.map(kv => (
-                            <option key={kv} value={kv}>{kv}</option>
-                          ))}
-                        </select>
+                  <div className="grid grid-cols-1 gap-4">
+                    {unknownVehiclesWithDetails.map(({ vehiculo, observations }) => (
+                      <div key={vehiculo} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                            Vehículo: <span className="text-amber-600">"{vehiculo}"</span>
+                          </label>
+                          <select
+                            value={vehicleMapping[vehiculo] || KNOWN_VEHICLES[0]}
+                            onChange={(e) => setVehicleMapping(prev => ({ ...prev, [vehiculo]: e.target.value }))}
+                            className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
+                          >
+                            {KNOWN_VEHICLES.map(kv => (
+                              <option key={kv} value={kv}>{kv}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
+                          <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
+                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                            {observations.map((obs, idx) => (
+                              <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                                <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -367,22 +638,36 @@ export default function ValidationModal({
                     <h3 className="font-bold">Zonas no reconocidas</h3>
                   </div>
                   <p className="text-sm text-amber-800 mb-4">
-                    Se encontraron zonas que no coinciden con "Capital" o "Interior". Por favor, verifique si están bien asignadas:
+                    Se detectaron "{totalUnknownZonesRoutes}" rutas con zonas que no coinciden con "Capital" o "Interior". Por favor, verifique si están bien asignadas:
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {unknownZonesWithSucursal.map(({ zona, sucursales }) => (
-                      <div key={zona} className="space-y-1">
-                        <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                          "{zona}" <span className="text-amber-600 font-normal lowercase">(en {sucursales.join(", ")})</span>
-                        </label>
-                        <select
-                          value={zoneMapping[zona] || "CAPITAL"}
-                          onChange={(e) => setZoneMapping(prev => ({ ...prev, [zona]: e.target.value }))}
-                          className="w-full text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500"
-                        >
-                          <option value="CAPITAL">CAPITAL</option>
-                          <option value="INTERIOR">INTERIOR</option>
-                        </select>
+                  <div className="grid grid-cols-1 gap-4">
+                    {unknownZonesWithDetails.map(({ zona, observations }) => (
+                      <div key={zona} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                            Zona: <span className="text-amber-600">"{zona}"</span>
+                          </label>
+                          <select
+                            value={zoneMapping[zona] || "CAPITAL"}
+                            onChange={(e) => setZoneMapping(prev => ({ ...prev, [zona]: e.target.value }))}
+                            className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
+                          >
+                            <option value="CAPITAL">CAPITAL</option>
+                            <option value="INTERIOR">INTERIOR</option>
+                          </select>
+                        </div>
+
+                        <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
+                          <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
+                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                            {observations.map((obs, idx) => (
+                              <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                                <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -434,7 +719,7 @@ export default function ValidationModal({
                   <h3 className="font-bold">Presupuestos detectados</h3>
                 </div>
                 <p className="text-sm text-amber-800 mb-6">
-                  Se encontraron presupuestos en el archivo cargado. Por favor, verifique la información:
+                  Se detectaron "{differentBudgetsCount}" presupuestos en el archivo cargado. Por favor, verifique la información:
                 </p>
                 
                 <div className="space-y-2">
@@ -508,61 +793,76 @@ export default function ValidationModal({
                   <h3 className="font-bold">Conflictos de datos detectados</h3>
                 </div>
                 <p className="text-sm text-danger-800 mb-4">
-                  Se encontraron {conflicts.length} rutas que ya existen pero con datos diferentes. Por favor, seleccione qué acción tomar para cada una:
+                  Se detectaron "{conflicts.length}" conflictos en rutas que ya existen pero con datos diferentes. Por favor, seleccione qué acción tomar para cada una:
                 </p>
                 <div className="space-y-4">
-                  {conflicts.map((c) => (
-                    <div key={c.id} className="p-4 bg-white rounded-xl border border-danger-100 shadow-sm">
-                      <div className="space-y-4">
-                        {getDifferences(c.existing, c.incoming).map((diff, idx) => (
-                          <div key={idx} className="space-y-2">
-                            <p className="text-xs font-medium text-secondary-900">
-                              {c.incoming.fecha} - {c.incoming.sucursal} - Ruta {c.incoming.hojaRuta} - <span className="text-danger-600 font-bold">Columna: {diff.field}</span>
-                            </p>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="p-2.5 bg-secondary-50 rounded-lg border border-secondary-200">
-                                <span className="text-[9px] font-bold text-secondary-500 uppercase block mb-1">Dato Actual:</span>
-                                <span className="text-xs text-secondary-900 font-medium">
-                                  {typeof diff.existing === 'number' && diff.field === 'Costo' 
-                                    ? `$${diff.existing.toLocaleString()}` 
-                                    : String(diff.existing)}
-                                </span>
-                              </div>
-                              <div className="p-2.5 bg-primary-50 rounded-lg border border-primary-200">
-                                <span className="text-[9px] font-bold text-primary-500 uppercase block mb-1">Dato Nuevo:</span>
-                                <span className="text-xs text-primary-900 font-bold">
-                                  {typeof diff.incoming === 'number' && diff.field === 'Costo' 
-                                    ? `$${diff.incoming.toLocaleString()}` 
-                                    : String(diff.incoming)}
-                                </span>
+                  {conflicts.map((c) => {
+                    const diffs = getDifferences(c.existing, c.incoming);
+                    return (
+                      <div key={c.id} className="p-4 bg-white rounded-xl border border-danger-100 shadow-sm">
+                        <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-danger-50">
+                          <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                            {c.incoming.sucursal}
+                          </span>
+                          <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                            {c.incoming.fecha}
+                          </span>
+                          <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                            Ruta: {c.incoming.hojaRuta}
+                          </span>
+                        </div>
+
+                        <div className="space-y-4">
+                          {diffs.map((diff, idx) => (
+                            <div key={idx} className="space-y-2">
+                              <p className="text-xs font-bold text-danger-600">
+                                Diferencia en: {diff.field}
+                              </p>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="p-2.5 bg-secondary-50 rounded-lg border border-secondary-200">
+                                  <span className="text-[9px] font-bold text-secondary-500 uppercase block mb-1">Dato Actual:</span>
+                                  <span className="text-xs text-secondary-900 font-medium">
+                                    {typeof diff.existing === 'number' && diff.field === 'Costo' 
+                                      ? `$${diff.existing.toLocaleString()}` 
+                                      : String(diff.existing)}
+                                  </span>
+                                </div>
+                                <div className="p-2.5 bg-primary-50 rounded-lg border border-primary-200">
+                                  <span className="text-[9px] font-bold text-primary-500 uppercase block mb-1">Dato Nuevo:</span>
+                                  <span className="text-xs text-primary-900 font-bold">
+                                    {typeof diff.incoming === 'number' && diff.field === 'Costo' 
+                                      ? `$${diff.incoming.toLocaleString()}` 
+                                      : String(diff.incoming)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
 
-                      <div className="flex items-center space-x-8 mt-4 pt-4 border-t border-danger-50">
-                        <label className="flex items-center space-x-2.5 cursor-pointer group">
-                          <input
-                            type="radio"
-                            checked={conflictResolution[c.id] === 'replace'}
-                            onChange={() => setConflictResolution(prev => ({ ...prev, [c.id]: 'replace' }))}
-                            className="w-4 h-4 text-danger-600 focus:ring-danger-500"
-                          />
-                          <span className="text-xs font-bold text-danger-800 group-hover:text-danger-900 uppercase tracking-wide">Reemplazar</span>
-                        </label>
-                        <label className="flex items-center space-x-2.5 cursor-pointer group">
-                          <input
-                            type="radio"
-                            checked={conflictResolution[c.id] === 'keep'}
-                            onChange={() => setConflictResolution(prev => ({ ...prev, [c.id]: 'keep' }))}
-                            className="w-4 h-4 text-secondary-600 focus:ring-secondary-500"
-                          />
-                          <span className="text-xs font-bold text-secondary-800 group-hover:text-secondary-900 uppercase tracking-wide">Mantener actual</span>
-                        </label>
+                        <div className="flex items-center space-x-8 mt-4 pt-4 border-t border-danger-50">
+                          <label className="flex items-center space-x-2.5 cursor-pointer group">
+                            <input
+                              type="radio"
+                              checked={conflictResolution[c.id] === 'replace'}
+                              onChange={() => setConflictResolution(prev => ({ ...prev, [c.id]: 'replace' }))}
+                              className="w-4 h-4 text-danger-600 focus:ring-danger-500"
+                            />
+                            <span className="text-xs font-bold text-danger-800 group-hover:text-danger-900 uppercase tracking-wide">Reemplazar</span>
+                          </label>
+                          <label className="flex items-center space-x-2.5 cursor-pointer group">
+                            <input
+                              type="radio"
+                              checked={conflictResolution[c.id] === 'keep'}
+                              onChange={() => setConflictResolution(prev => ({ ...prev, [c.id]: 'keep' }))}
+                              className="w-4 h-4 text-secondary-600 focus:ring-secondary-500"
+                            />
+                            <span className="text-xs font-bold text-secondary-800 group-hover:text-secondary-900 uppercase tracking-wide">Mantener actual</span>
+                          </label>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -574,6 +874,7 @@ export default function ValidationModal({
                   { label: "Distribuidores", value: uniqueDistribuidores },
                   { label: "Sucursales", value: uniqueSucursales },
                   { label: "Piezas Totales", value: totalPiezas },
+                  { label: "Bultos Totales", value: totalBultos },
                   { label: "Sucursales detectadas", value: sucursalesEnArchivo.length > 0 ? sucursalesEnArchivo.join(", ") : "Ninguna" },
                   { 
                     label: "Presupuestos", 
@@ -594,6 +895,16 @@ export default function ValidationModal({
                     label: "Rutas modificadas", 
                     value: conflicts.length,
                     colorClass: conflicts.length > 0 ? "text-indigo-600" : "text-secondary-500"
+                  },
+                  { 
+                    label: "Cantidad piezas corregidas", 
+                    value: correctedPiezasCount,
+                    colorClass: correctedPiezasCount > 0 ? "text-primary-600" : "text-secondary-500"
+                  },
+                  { 
+                    label: "Cantidad bultos corregidos", 
+                    value: correctedBultosCount,
+                    colorClass: correctedBultosCount > 0 ? "text-primary-600" : "text-secondary-500"
                   },
                 ].map((item, index) => (
                   <div
@@ -627,7 +938,7 @@ export default function ValidationModal({
                       </thead>
                       <tbody className="divide-y divide-primary-50">
                         {newRoutes.map((route, idx) => (
-                          <tr key={idx} className="hover:bg-primary-50/30">
+                          <tr key={idx} className="hover:bg-secondary-300 transition-colors">
                             <td className="px-3 py-1.5 text-secondary-700 whitespace-nowrap">{route.sucursal}</td>
                             <td className="px-3 py-1.5 text-secondary-700 whitespace-nowrap">{route.fecha}</td>
                             <td className="px-3 py-1.5 text-secondary-900 font-bold">{route.hojaRuta}</td>
@@ -659,7 +970,7 @@ export default function ValidationModal({
                         {replacedRoutes.map((c, idx) => {
                           const diffs = getDifferences(c.existing, c.incoming);
                           return (
-                            <tr key={idx} className="hover:bg-primary-50/30">
+                            <tr key={idx} className="hover:bg-secondary-300 transition-colors">
                               <td className="px-3 py-1.5 text-secondary-700 whitespace-nowrap">{c.incoming.sucursal}</td>
                               <td className="px-3 py-1.5 text-secondary-700 whitespace-nowrap">{c.incoming.fecha}</td>
                               <td className="px-3 py-1.5 text-secondary-900 font-bold whitespace-nowrap">{c.incoming.hojaRuta}</td>
@@ -691,19 +1002,29 @@ export default function ValidationModal({
         </div>
 
         <div className="px-5 py-4 bg-secondary-50 border-t border-secondary-100 flex items-center justify-center space-x-4">
+          {stepHistory.length > 0 && (
+            <button
+              onClick={handleBack}
+              className="inline-flex justify-center items-center px-6 py-2.5 text-sm font-semibold text-primary-600 hover:text-primary-800 hover:bg-primary-50 rounded-lg border border-primary-200 transition-all duration-200 cursor-pointer"
+            >
+              Volver Atrás
+            </button>
+          )}
+
           <button
             onClick={onCancel}
-            className="inline-flex justify-center items-center px-8 py-2.5 text-sm font-semibold text-white bg-danger-600 rounded-lg hover:bg-danger-700 transition-all duration-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-danger-500 cursor-pointer min-w-[140px]"
+            className="inline-flex justify-center items-center px-6 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all duration-200 cursor-pointer shadow-sm"
           >
             <XCircle className="w-4 h-4 mr-2" />
             Cancelar
           </button>
+
           <button
             onClick={handleConfirm}
-            className="inline-flex justify-center items-center px-8 py-2.5 text-sm font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-all duration-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 cursor-pointer min-w-[140px]"
+            className="inline-flex justify-center items-center px-8 py-2.5 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform active:scale-95 cursor-pointer min-w-[140px]"
           >
             <CheckCircle2 className="w-4 h-4 mr-2" />
-            {step === 'mapping' ? 'Siguiente' : step === 'branch_selection' ? 'Siguiente' : step === 'budget_validation' ? 'Siguiente' : step === 'conflicts' ? 'Confirmar Diferencias' : 'Continuar'}
+            {step === 'validation' ? 'Confirmar y Finalizar' : 'Continuar'}
           </button>
         </div>
       </motion.div>
