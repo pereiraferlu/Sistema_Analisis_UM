@@ -82,12 +82,13 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
 
 const parseZona = (zonaRaw: string, colQ: string): string => {
   const normalized = normalizeZone(zonaRaw);
-  if (normalized) return normalized === "CAPITAL" ? "Capital" : "Interior";
+  if (normalized === "CAPITAL") return "Capital";
+  if (normalized === "INTERIOR") return "Interior";
 
   if (zonaRaw) return zonaRaw;
-  const q = colQ.toLowerCase();
-  if (q.includes("viaje")) return "Interior";
-  return "Capital";
+  
+  // Si no hay datos, devolvemos un marcador para que el modal de validación lo detecte
+  return "SIN_ZONA";
 };
 
 export default function FileUpload({ onDataLoaded }: FileUploadProps) {
@@ -271,6 +272,11 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
 
                 const obs = String(getVal(["observaciones", "obs", "comentarios"]) || "");
 
+                const piezasEntregadas = Number(getVal(["piezasEntregadas", "piezas Entregadas", "cantidad de piezas entregas", "entregadas"])) || 0;
+                const piezasNoEntregadas = Number(getVal(["piezasNoEntregadas", "piezas No Entregadas", "cantidad de no entregas", "no entregas"])) || 0;
+                const bultosEntregados = Number(getVal(["bultosEntregados", "bultos entregado"])) || 0;
+                const bultosDevueltos = Number(getVal(["bultosDevueltos", "bultos devueltos"])) || 0;
+
                 item = {
                   fecha: fecha,
                   distribuidor: distribuidor,
@@ -282,12 +288,14 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
                   palets: Number(getVal(["palets"])) || 0,
                   peso: Number(getVal(["peso", "kg transportado", "kg"])) || 0,
                   zona: parseZona(String(getVal(["zona", "zonas cap-int", "zonas"]) || ""), obs),
-                  piezasEntregadas: Number(getVal(["piezasEntregadas", "piezas Entregadas", "cantidad de piezas entregas", "entregadas"])) || 0,
-                  piezasNoEntregadas: Number(getVal(["piezasNoEntregadas", "piezas No Entregadas", "cantidad de no entregas", "no entregas"])) || 0,
+                  piezasEntregadas: piezasEntregadas,
+                  piezasNoEntregadas: piezasNoEntregadas,
+                  piezasSinNovedad: piezasEntregadas, // Mapping to piezasEntregadas
                   visitadasNovedad: Number(getVal(["visitadasNovedad", "visitadas Novedad", "visitadas con novedad"])) || 0,
                   noVisitadas: Number(getVal(["noVisitadas"])) || 0,
-                  bultosEntregados: Number(getVal(["bultosEntregados", "bultos entregado"])) || 0,
-                  bultosDevueltos: Number(getVal(["bultosDevueltos", "bultos devueltos"])) || 0,
+                  bultosEntregados: bultosEntregados,
+                  bultosDevueltos: bultosDevueltos,
+                  bultosNoEntregados: bultosDevueltos, // Mapping to bultosDevueltos
                   costoTotal: Number(getVal(["costoTotal", "costo total jornal o pieza", "costo"])) || 0,
                   presupuesto: Number(getVal(["presupuesto"])) || presupuestosMap[assignedSucursal],
                   observaciones: obs,
@@ -315,6 +323,11 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
 
                 const colQ = String(row[16 + offset] || "");
 
+                const piezasEntregadasLegacy = Number(row[9 + offset]) || 0;
+                const piezasNoEntregadasLegacy = Number(row[10 + offset]) || 0;
+                const bultosEntregadosLegacy = Number(row[13 + offset]) || 0;
+                const bultosDevueltosLegacy = Number(row[14 + offset]) || 0;
+
                 item = {
                   fecha: fecha,
                   distribuidor: distribuidor,
@@ -326,12 +339,14 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
                   palets: Number(row[6 + offset]) || 0,
                   peso: Number(row[7 + offset]) || 0,
                   zona: parseZona(String(row[8 + offset] || ""), colQ),
-                  piezasEntregadas: Number(row[9 + offset]) || 0,
-                  piezasNoEntregadas: Number(row[10 + offset]) || 0,
+                  piezasEntregadas: piezasEntregadasLegacy,
+                  piezasNoEntregadas: piezasNoEntregadasLegacy,
+                  piezasSinNovedad: piezasEntregadasLegacy,
                   visitadasNovedad: Number(row[11 + offset]) || 0,
                   noVisitadas: Number(row[12 + offset]) || 0,
-                  bultosEntregados: Number(row[13 + offset]) || 0,
-                  bultosDevueltos: Number(row[14 + offset]) || 0,
+                  bultosEntregados: bultosEntregadosLegacy,
+                  bultosDevueltos: bultosDevueltosLegacy,
+                  bultosNoEntregados: bultosDevueltosLegacy,
                   costoTotal: Number(row[15 + offset]) || 0,
                   presupuesto: presupuestosMap[assignedSucursal],
                   observaciones: colQ,

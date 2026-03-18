@@ -83,39 +83,33 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, onRevali
   );
 
   const isGeneral = selectedSucursal === "General";
-  // URL directa al backend en Render para producción (Vercel)
-  const BACKEND_URL = "https://flash-backend-lbej.onrender.com";
-
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/export`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ 
-          data: filteredData, 
-          selectedSucursal, 
-          presupuestos 
-        }),
+      const exportData = selectedSucursal === "General" ? data : data.filter(d => d.sucursal === selectedSucursal);
+      
+      const response = await fetch('https://flash-backend-lbej.onrender.com/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: exportData,
+          selectedSucursal: selectedSucursal,
+          presupuestos: presupuestos
+        })
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Backend error response:", errorText);
-        throw new Error(`Error al exportar los datos: ${response.status} ${errorText}`);
-      }
-
+      if (!response.ok) throw new Error('Export failed');
+      
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
-      a.download = `Reporte_${selectedSucursal === "General" ? "General" : selectedSucursal}_${new Date().toISOString().split("T")[0]}.xlsx`;
+      const filename = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || `Reporte_${selectedSucursal}_${new Date().toISOString().split("T")[0]}.xlsx`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
+      a.remove();
       window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
       setIsSidebarOpen(false);
     } catch (error) {
       console.error("Export failed", error);
@@ -128,33 +122,27 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, onRevali
   const handleSaveAndExport = async () => {
     setIsSaving(true);
     try {
-      // Apuntando directamente al backend de Python en Render
-      const response = await fetch(`${BACKEND_URL}/api/export-consolidated`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ data, presupuestos }),
+      const response = await fetch('https://flash-backend-lbej.onrender.com/api/export-consolidated', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: data,
+          presupuestos: presupuestos
+        })
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Error al exportar consolidado: ${response.status} ${errorText}`);
-      }
+      if (!response.ok) throw new Error('Consolidated export failed');
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
-      
-      const now = new Date();
-      const dateStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getFullYear()).slice(-2)}`;
-      
-      a.download = `Consolidado ${dateStr}.xlsx`;
+      const filename = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || `Consolidado_${new Date().toISOString().split("T")[0]}.xlsx`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
+      a.remove();
       window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
       setIsSidebarOpen(false);
     } catch (error) {
       console.error("Consolidated export failed", error);
@@ -296,7 +284,29 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, onRevali
                 </p>
               </div>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-4">
+              <div className="relative group">
+                <select
+                  value={selectedSucursal}
+                  onChange={(e) => setSelectedSucursal(e.target.value)}
+                  className="appearance-none bg-secondary-900 text-white pl-4 pr-10 py-2 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 cursor-pointer"
+                >
+                  {sucursalesList.map((sucursal) => (
+                    <option key={sucursal} value={sucursal}>
+                      {sucursal}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-white">
+                  <svg
+                    className="h-4 w-4 fill-current"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                  >
+                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                  </svg>
+                </div>
+              </div>
               <button
                 onClick={() => setIsSidebarOpen(true)}
                 className="p-2 hover:bg-secondary-100 rounded-lg transition-colors cursor-pointer"
@@ -310,7 +320,7 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, onRevali
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Tabs Navigation */}
-        <div className="mb-8 flex justify-between items-center">
+        <div className="mb-8">
           <nav className="flex space-x-2 overflow-x-auto" aria-label="Tabs">
             {tabs.map((tab) => (
               <button
@@ -330,29 +340,6 @@ export default function Dashboard({ data, fileName, onReset, onAddFile, onRevali
               </button>
             ))}
           </nav>
-          
-          <div className="relative group ml-4">
-            <select
-              value={selectedSucursal}
-              onChange={(e) => setSelectedSucursal(e.target.value)}
-              className="appearance-none bg-secondary-900 text-white pl-4 pr-10 py-2 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 cursor-pointer"
-            >
-              {sucursalesList.map((sucursal) => (
-                <option key={sucursal} value={sucursal}>
-                  {sucursal}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-white">
-              <svg
-                className="h-4 w-4 fill-current"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-              >
-                <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-              </svg>
-            </div>
-          </div>
         </div>
 
         {/* Active Module Content */}

@@ -84,7 +84,7 @@ export default function ValidationModal({
       }).length;
   }, [pendingPresupuestos, selectedSucursal, existingPresupuestos]);
 
-  const [step, setStep] = useState<'quantity_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
+  const [step, setStep] = useState<'quantity_validation' | 'novedad_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
     'quantity_validation'
   );
   const [stepHistory, setStepHistory] = useState<string[]>([]);
@@ -93,29 +93,62 @@ export default function ValidationModal({
   const [zoneMapping, setZoneMapping] = useState<Record<string, string>>({});
   const [corrections, setCorrections] = useState<Record<number, Partial<LogisticsData>>>({});
   const [excludedIndices, setExcludedIndices] = useState<Set<number>>(new Set());
+  const [allDeliveredIndices, setAllDeliveredIndices] = useState<Set<number>>(new Set());
+  const [allNoveltyIndices, setAllNoveltyIndices] = useState<Set<number>>(new Set());
 
   const mappedData = useMemo<LogisticsData[]>(() => {
     return data.map((d, index) => {
       const correction = corrections[index] || {};
-      return {
+      const isAllDelivered = allDeliveredIndices.has(index);
+      const isAllNovelty = allNoveltyIndices.has(index);
+
+      const finalItem = {
         ...d,
         ...correction,
         vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
         zona: normalizeZone(d.zona) || zoneMapping[d.zona] || d.zona,
       } as LogisticsData;
+
+      if (isAllDelivered && finalItem.bultosTotal >= finalItem.piezasTotal) {
+        finalItem.piezasEntregadas = finalItem.piezasTotal;
+        finalItem.piezasNoEntregadas = 0;
+        finalItem.bultosEntregados = finalItem.bultosTotal;
+        finalItem.bultosDevueltos = 0;
+      }
+
+      if (isAllNovelty) {
+        finalItem.visitadasNovedad = finalItem.piezasTotal;
+        finalItem.noVisitadas = 0;
+      }
+
+      // Sync extra fields to ensure backend receives correct data even after corrections
+      finalItem.piezasSinNovedad = finalItem.piezasEntregadas;
+      finalItem.bultosNoEntregados = finalItem.bultosDevueltos;
+
+      return finalItem;
     });
-  }, [data, vehicleMapping, zoneMapping, corrections]);
+  }, [data, vehicleMapping, zoneMapping, corrections, allDeliveredIndices, allNoveltyIndices]);
 
   const initialDiscrepancyIndices = useMemo(() => {
     return data.map((d, index) => {
-      const hasQuantityError = (d.piezasEntregadas + d.piezasNoEntregadas !== d.piezasTotal) ||
-                               (d.bultosEntregados + d.bultosDevueltos !== d.bultosTotal);
-      const hasBultosPiezasError = d.bultosTotal < d.piezasTotal || 
-                                   d.bultosEntregados < d.piezasEntregadas || 
-                                   d.bultosDevueltos < d.piezasNoEntregadas;
+      const correction = corrections[index] || {};
+      
+      const piezasTotal = correction.piezasTotal ?? d.piezasTotal;
+      const bultosTotal = correction.bultosTotal ?? d.bultosTotal;
+      
+      const piezasEntregadas = correction.piezasEntregadas ?? d.piezasEntregadas;
+      const piezasNoEntregadas = correction.piezasNoEntregadas ?? d.piezasNoEntregadas;
+      const bultosEntregados = correction.bultosEntregados ?? d.bultosEntregados;
+      const bultosDevueltos = correction.bultosDevueltos ?? d.bultosDevueltos;
+
+      const hasQuantityError = (piezasEntregadas + piezasNoEntregadas !== piezasTotal) ||
+                               (bultosEntregados + bultosDevueltos !== bultosTotal);
+      const hasBultosPiezasError = bultosTotal < piezasTotal || 
+                                   bultosEntregados < piezasEntregadas || 
+                                   bultosDevueltos < piezasNoEntregadas;
       return (hasQuantityError || hasBultosPiezasError) ? index : -1;
     }).filter(idx => idx !== -1);
-  }, [data]);
+  }, [data, corrections]);
 
   const quantityDiscrepancies = useMemo(() => {
     return initialDiscrepancyIndices.map(index => ({
@@ -132,12 +165,39 @@ export default function ValidationModal({
     return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.bultosTotal !== undefined || c.bultosEntregados !== undefined || c.bultosDevueltos !== undefined).length;
   }, [corrections]);
 
+  const initialNovedadDiscrepancyIndices = useMemo(() => {
+    return data.map((d, index) => {
+      const correction = corrections[index] || {};
+
+      const piezasTotal = correction.piezasTotal ?? d.piezasTotal;
+      const visitadasNovedad = correction.visitadasNovedad ?? d.visitadasNovedad;
+      const noVisitadas = correction.noVisitadas ?? d.noVisitadas;
+
+      // The user's logic: visitadasNovedad + noVisitadas must equal piezasTotal
+      const hasNovedadError = (visitadasNovedad + noVisitadas !== piezasTotal);
+      return hasNovedadError ? index : -1;
+    }).filter(idx => idx !== -1);
+  }, [data, corrections]);
+
+  const novedadDiscrepancies = useMemo(() => {
+    return initialNovedadDiscrepancyIndices.map(index => ({
+      data: mappedData[index],
+      index
+    }));
+  }, [initialNovedadDiscrepancyIndices, mappedData]);
+
+  const correctedNovedadesCount = useMemo(() => {
+    return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.visitadasNovedad !== undefined || c.noVisitadas !== undefined).length;
+  }, [corrections]);
+
   useEffect(() => {
     // Initial step determination
     if (isPending) {
       setStep('branch_selection');
     } else if (quantityDiscrepancies.length > 0) {
       setStep('quantity_validation');
+    } else if (novedadDiscrepancies.length > 0) {
+      setStep('novedad_validation');
     } else if (needsMapping) {
       setStep('mapping');
     } else if (hasDifferentPresupuestos) {
@@ -294,12 +354,20 @@ export default function ValidationModal({
     const nextStep = (currentStep: string): any => {
       if (currentStep === 'branch_selection') {
         if (quantityDiscrepancies.length > 0) return 'quantity_validation';
+        if (novedadDiscrepancies.length > 0) return 'novedad_validation';
         if (needsMapping) return 'mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
       }
       if (currentStep === 'quantity_validation') {
+        if (novedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (needsMapping) return 'mapping';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'novedad_validation') {
         if (needsMapping) return 'mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
@@ -451,20 +519,37 @@ export default function ValidationModal({
                             </span>
                           </div>
                           
-                          <label className="flex items-center space-x-2 cursor-pointer group">
-                            <input
-                              type="checkbox"
-                              checked={isExcluded}
-                              onChange={() => {
-                                const newExcluded = new Set(excludedIndices);
-                                if (isExcluded) newExcluded.delete(index);
-                                else newExcluded.add(index);
-                                setExcludedIndices(newExcluded);
-                              }}
-                              className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
-                            />
-                            <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">No incluir ruta</span>
-                          </label>
+                          <div className="flex flex-col items-end space-y-2">
+                            <label className="flex items-center space-x-2 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={isExcluded}
+                                onChange={() => {
+                                  const newExcluded = new Set(excludedIndices);
+                                  if (isExcluded) newExcluded.delete(index);
+                                  else newExcluded.add(index);
+                                  setExcludedIndices(newExcluded);
+                                }}
+                                className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                              />
+                              <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">No incluir ruta</span>
+                            </label>
+
+                            <label className="flex items-center space-x-2 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={allDeliveredIndices.has(index)}
+                                onChange={() => {
+                                  const newAllDelivered = new Set(allDeliveredIndices);
+                                  if (allDeliveredIndices.has(index)) newAllDelivered.delete(index);
+                                  else newAllDelivered.add(index);
+                                  setAllDeliveredIndices(newAllDelivered);
+                                }}
+                                className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                              />
+                              <span className="text-[10px] font-bold text-primary-600 uppercase group-hover:text-primary-700">Poner todo a entregado</span>
+                            </label>
+                          </div>
                         </div>
 
                         {!isExcluded && (
@@ -585,6 +670,131 @@ export default function ValidationModal({
                 </p>
               </div>
             </div>
+          ) : step === 'novedad_validation' ? (
+            <div className="space-y-6">
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center space-x-2 mb-4 text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold">Discrepancias en Novedades</h3>
+                </div>
+                <p className="text-sm text-amber-800 mb-6">
+                  Se detectaron "{novedadDiscrepancies.length}" rutas donde la suma de (Visitadas con Novedad + No Visitadas) no coincide con el Total de Piezas. Por favor, corrija los datos:
+                </p>
+
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {novedadDiscrepancies.map(({ data: item, index }) => {
+                    const correction = corrections[index] || {};
+                    const isAllNovelty = allNoveltyIndices.has(index);
+                    const isExcluded = excludedIndices.has(index);
+
+                    const piezasTotal = correction.piezasTotal ?? item.piezasTotal;
+                    let visitadasNovedad = correction.visitadasNovedad ?? item.visitadasNovedad;
+                    let noVisitadas = correction.noVisitadas ?? item.noVisitadas;
+
+                    if (isAllNovelty) {
+                      visitadasNovedad = piezasTotal;
+                      noVisitadas = 0;
+                    }
+                    
+                    const sum = visitadasNovedad + noVisitadas;
+                    const diff = sum - piezasTotal;
+                    const hasError = diff !== 0;
+
+                    const isCollapsed = isExcluded;
+
+                    return (
+                      <div key={index} className={`p-4 rounded-xl border transition-all duration-200 ${isExcluded ? 'opacity-50 grayscale border-secondary-200 bg-secondary-50' : hasError ? 'bg-white border-danger-200 shadow-sm' : 'bg-success-50 border-success-200'}`}>
+                        <div className={`flex flex-wrap items-center justify-between gap-4 ${!isCollapsed ? 'mb-4 pb-3 border-b border-secondary-100' : ''}`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {item.sucursal === "PENDING_SUCURSAL" ? selectedSucursal : item.sucursal}
+                            </span>
+                            <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {item.fecha}
+                            </span>
+                            <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              HDR: {item.hojaRuta}
+                            </span>
+                            {!isCollapsed && (
+                              <div className={`text-[10px] font-bold px-2 py-0.5 rounded ${hasError ? 'bg-danger-100 text-danger-600' : 'bg-success-100 text-success-600'}`}>
+                                {hasError ? `Diferencia: ${diff > 0 ? '+' : ''}${diff} (Suma: ${sum} / Total: ${piezasTotal})` : 'Corregido'}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-col items-end space-y-2">
+                            <label className="flex items-center space-x-2 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={isExcluded}
+                                onChange={() => {
+                                  const newExcluded = new Set(excludedIndices);
+                                  if (isExcluded) newExcluded.delete(index);
+                                  else newExcluded.add(index);
+                                  setExcludedIndices(newExcluded);
+                                }}
+                                className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                              />
+                              <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">No incluir ruta</span>
+                            </label>
+
+                            <label className="flex items-center space-x-2 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={isAllNovelty}
+                                onChange={() => {
+                                  const newAllNovelty = new Set(allNoveltyIndices);
+                                  if (isAllNovelty) newAllNovelty.delete(index);
+                                  else newAllNovelty.add(index);
+                                  setAllNoveltyIndices(newAllNovelty);
+                                }}
+                                className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                              />
+                              <span className="text-[10px] font-bold text-primary-600 uppercase group-hover:text-primary-700">Marcar piezas con novedad</span>
+                            </label>
+                          </div>
+                        </div>
+
+                        {!isCollapsed && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold text-secondary-500 uppercase">Piezas Total</label>
+                              <input
+                                type="number"
+                                value={piezasTotal}
+                                onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], piezasTotal: Number(e.target.value) } }))}
+                                className={`w-full px-3 py-2 text-sm rounded-lg border focus:ring-2 focus:ring-primary-500 transition-all ${hasError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200 bg-secondary-50'}`}
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold text-secondary-500 uppercase">Visitadas con Novedad</label>
+                              <input
+                                type="number"
+                                value={visitadasNovedad}
+                                onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], visitadasNovedad: Number(e.target.value) } }))}
+                                className={`w-full px-3 py-2 text-sm rounded-lg border focus:ring-2 focus:ring-primary-500 transition-all ${hasError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200 bg-secondary-50'}`}
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold text-secondary-500 uppercase">No Visitadas (Sin Novedad)</label>
+                              <input
+                                type="number"
+                                value={noVisitadas}
+                                onFocus={(e) => e.target.value === '0' && (e.target.value = '')}
+                                onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], noVisitadas: Number(e.target.value) } }))}
+                                className={`w-full px-3 py-2 text-sm rounded-lg border focus:ring-2 focus:ring-primary-500 transition-all ${hasError ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-secondary-200 bg-secondary-50'}`}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           ) : step === 'mapping' ? (
             <div className="space-y-6">
               {unknownVehicles.length > 0 && (
@@ -645,7 +855,7 @@ export default function ValidationModal({
                       <div key={zona} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                            Zona: <span className="text-amber-600">"{zona}"</span>
+                            Zona: <span className="text-amber-600">"{zona === "SIN_ZONA" ? "Sin Zona (Celda vacía)" : zona}"</span>
                           </label>
                           <select
                             value={zoneMapping[zona] || "CAPITAL"}
