@@ -32,7 +32,7 @@ import Fechas from "./modules/Fechas";
 import Zonas from "./modules/Zonas";
 import Costos from "./modules/Costos";
 import Piezas from "./modules/Piezas";
-import { Route, PlusCircle } from "lucide-react";
+import { PlusCircle, Users, CheckCircle2 } from "lucide-react";
 import Sidebar from "./Sidebar";
 
 interface DashboardProps {

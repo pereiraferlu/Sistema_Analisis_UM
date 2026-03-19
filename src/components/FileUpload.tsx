@@ -13,14 +13,90 @@ interface FileUploadProps {
   ) => void;
 }
 
-const KNOWN_BRANCHES = [
-  "Tucuman",
-  "La Rioja",
-  "Catamarca",
-  "Salta",
-  "Jujuy",
-  "Santiago"
-];
+const KNOWN_SUCURSALES = ["Tucuman", "Salta", "Jujuy", "Catamarca", "Santiago", "La Rioja"];
+
+function isConsolidatedFile(workbook: XLSX.WorkBook): boolean {
+  return workbook.SheetNames.includes("General") &&
+         workbook.SheetNames.some(s => KNOWN_SUCURSALES.includes(s));
+}
+
+function parseConsolidatedFile(workbook: XLSX.WorkBook): {
+  records: LogisticsData[];
+  presupuestos: Record<string, number>;
+} {
+  const records: LogisticsData[] = [];
+  const presupuestos: Record<string, number> = {};
+
+  // ── 1. Leer presupuestos desde hoja General ──────────────────────────────
+  const generalWs = workbook.Sheets["General"];
+  if (generalWs) {
+    const allRows = XLSX.utils.sheet_to_json<any[]>(generalWs, {
+      header: 1,
+      defval: null,
+    });
+    for (const row of allRows) {
+      if (!Array.isArray(row)) continue;
+      const colB = row[1]; 
+      const colC = row[2]; 
+      if (colB && KNOWN_SUCURSALES.includes(String(colB))) {
+        presupuestos[String(colB)] = Number(colC) || 0;
+      }
+    }
+  }
+
+  // ── 2. Leer datos de cada hoja de sucursal ───────────────────────────────
+  for (const sheetName of workbook.SheetNames) {
+    if (sheetName === "General") continue;
+    if (!KNOWN_SUCURSALES.includes(sheetName)) continue;
+
+    const ws = workbook.Sheets[sheetName];
+    if (!ws) continue;
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, {
+      defval: null,
+      raw: true,
+    });
+
+    for (const row of rows) {
+      const fechaVal = row['Fecha'];
+      if (fechaVal === 'TOTAL' || fechaVal == null) continue;
+      if (typeof row['Total Piezas'] === 'string') continue;
+
+      records.push({
+        sucursal:           sheetName,
+        distribuidor:       String(row['Distribuidor']          ?? ''),
+        vehiculo:           String(row['Vehículo']              ?? ''),
+        hojaRuta:           String(row['Hoja de Ruta']          ?? ''),
+        fecha:              normalizeDate(row['Fecha']),
+        piezasTotal:        Number(row['Total Piezas']          ?? 0),
+        bultosTotal:        Number(row['Total Bultos']          ?? 0),
+        zona:               String(row['Zona']                  ?? ''),
+        piezasEntregadas:   Number(row['Piezas Entregadas']     ?? 0),
+        piezasNoEntregadas: Number(row['Piezas No Entregadas']  ?? 0),
+        visitadasNovedad:   Number(row['Visitadas con Novedad'] ?? 0),
+        noVisitadas:        Number(row['No Visitadas']          ?? 0),
+        bultosEntregados:   Number(row['Bultos Entregados']     ?? 0),
+        bultosNoEntregados: Number(row['Bultos No Entregados']  ?? 0),
+        costoTotal:         Number(row['Costo Total']           ?? 0),
+        observaciones:      String(row['Observaciones']         ?? ''),
+        cliente:            "N/A",
+        piezasSinNovedad:   Number(row['Piezas Entregadas']     ?? 0),
+        bultosDevueltos:    Number(row['Bultos No Entregados']  ?? 0),
+        palets:             0,
+        peso:               0,
+        retiros:            0
+      });
+    }
+  }
+
+  return { records, presupuestos };
+}
+
+const parseCurrency = (val: any): number => {
+  if (typeof val === "number") return val;
+  if (!val) return 0;
+  return parseInt(String(val).replace(/[^0-9-]/g, "")) || 0;
+};
 
 export const normalizeSucursalName = (name: string): string => {
   if (!name) return "Desconocida";
@@ -40,7 +116,6 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
   if (v.includes("moto")) return "Moto";
   if (v.includes("auto")) return "Auto";
   
-  // Primero buscamos coincidencias de "Grande"
   if (
     v.includes("camioneta grande") || 
     v.includes("sprinter") || 
@@ -52,7 +127,6 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
     return "Utilitario Grande";
   }
 
-  // Luego buscamos coincidencias de "Chica" o genéricas de "Camioneta"
   if (
     v.includes("camioneta") || 
     v.includes("tipo pequeño") || 
@@ -66,7 +140,6 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
     return "Utilitario Chico";
   }
 
-  // Camiones (se busca después para no confundir con camioneta)
   if (v.includes("dayli") || v.includes("daily") || v.includes("camion") || v.includes("camiòn") || v.includes("camión")) return "Camión";
   
   if (v.includes("local comercial") || v.includes("local")) return "Local Comercial";
@@ -87,7 +160,6 @@ const parseZona = (zonaRaw: string, colQ: string): string => {
 
   if (zonaRaw) return zonaRaw;
   
-  // Si no hay datos, devolvemos un marcador para que el modal de validación lo detecte
   return "SIN_ZONA";
 };
 
@@ -107,259 +179,179 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
       try {
         setProgress(30);
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: "binary", cellDates: true });
+        const workbook = XLSX.read(data, { type: "array" });
         setProgress(50);
 
-        const parsedData: LogisticsData[] = [];
+        let parsedData: LogisticsData[] = [];
         let totalPiezasExcel = 0;
         let totalBultosExcel = 0;
-
         let presupuestosMap: Record<string, number> = {};
-        
-        const isConsolidated = workbook.SheetNames.includes('General');
-        
-        if (isConsolidated) {
-          const generalWs = workbook.Sheets['General'];
-          const generalJson = XLSX.utils.sheet_to_json<any[]>(generalWs, { header: 1 });
-          
-          // Find Cost Table
-          let costTableIdx = -1;
-          for (let i = 0; i < generalJson.length; i++) {
-            const row = generalJson[i];
-            if (row && row[0] === 'DATOS DE COSTOS POR SUCURSAL') {
-              costTableIdx = i + 2; // Skip title and header row
-              break;
-            }
+
+        if (isConsolidatedFile(workbook)) {
+          const result = parseConsolidatedFile(workbook);
+          parsedData = result.records;
+          presupuestosMap = result.presupuestos;
+          totalPiezasExcel = parsedData.reduce((acc, r) => acc + r.piezasTotal, 0);
+          totalBultosExcel = parsedData.reduce((acc, r) => acc + r.bultosTotal, 0);
+        } else {
+          // Legacy / Single Sheet Parsing Logic
+          const dataSheets = workbook.SheetNames.filter(s => s !== 'General');
+          let sheetsToProcess: string[] = [];
+          let isSingleDataSheet = false;
+
+          if (dataSheets.length === 1) {
+            sheetsToProcess = [dataSheets[0]];
+            isSingleDataSheet = true;
+          } else {
+            sheetsToProcess = dataSheets.filter(s => {
+              const normalized = normalizeSucursalName(s);
+              return KNOWN_SUCURSALES.includes(normalized);
+            });
           }
-          
-          if (costTableIdx !== -1) {
-            for (let i = costTableIdx; i < generalJson.length; i++) {
-              const row = generalJson[i];
-              // Stop if we hit an empty row or the end of the table
-              if (!row || !row[0] || row[0] === 'Total') break;
+
+          sheetsToProcess.forEach((sheetName) => {
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, {
+              header: 1,
+              defval: "",
+            });
+
+            const normalizedSucursal = normalizeSucursalName(sheetName);
+            const isTucSuc = normalizedSucursal === "Tucuman";
+            const assignedSucursal = isSingleDataSheet ? "PENDING_SUCURSAL" : normalizedSucursal;
+
+            let headerRowIdx = -1;
+            const colMap: Record<string, number> = {};
+            
+            for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
+              const row = jsonData[i];
+              if (!Array.isArray(row)) continue;
               
-              const sucursalName = normalizeSucursalName(String(row[0]));
-              const budgetValue = Number(row[1]) || 0;
-              presupuestosMap[sucursalName] = budgetValue;
-            }
-          }
-        }
-
-        const budgetSheetName = workbook.SheetNames.find(s => {
-          if (s === 'General') return false;
-          const ws = workbook.Sheets[s];
-          const json = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
-          for (let i = 0; i < Math.min(json.length, 10); i++) {
-            const row = json[i];
-            if (row && row[1] && typeof row[1] === 'string') {
-              const header = row[1].toLowerCase().trim();
-              if (header === 'ppt' || header.includes('presupuesto') || header.includes('presu') || header === 'pres') {
-                return true;
-              }
-            }
-          }
-          return false;
-        });
-
-        if (budgetSheetName) {
-          const ws = workbook.Sheets[budgetSheetName];
-          const json = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
-          let headerRowIdx = -1;
-          for (let i = 0; i < Math.min(json.length, 10); i++) {
-            const row = json[i];
-            if (row && row[1] && typeof row[1] === 'string') {
-              const header = row[1].toLowerCase().trim();
-              if (header === 'ppt' || header.includes('presupuesto') || header.includes('presu') || header === 'pres') {
+              const rowStr = row.map(c => String(c || "").toLowerCase().trim().replace(/\s+/g, ""));
+              if (rowStr.includes("hojaruta") || rowStr.includes("distribuidor") || rowStr.includes("piezastotal")) {
                 headerRowIdx = i;
+                rowStr.forEach((val, idx) => {
+                  if (val) colMap[val] = idx;
+                });
                 break;
               }
             }
-          }
-          
-          if (headerRowIdx !== -1) {
-            for (let i = headerRowIdx + 1; i < json.length; i++) {
-              const row = json[i];
-              if (row && row[0] && row[1] !== undefined) {
-                const sucursalName = normalizeSucursalName(String(row[0]));
-                const budgetValue = Number(row[1]) || 0;
-                presupuestosMap[sucursalName] = budgetValue;
-              }
-            }
-          }
-        }
 
-        const dataSheets = workbook.SheetNames.filter(s => s !== budgetSheetName && s !== 'General');
-        
-        let sheetsToProcess: string[] = [];
-        let isSingleDataSheet = false;
+            const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 4;
 
-        if (dataSheets.length === 1) {
-          sheetsToProcess = [dataSheets[0]];
-          isSingleDataSheet = true;
-        } else {
-          sheetsToProcess = dataSheets.filter(s => {
-            const normalized = normalizeSucursalName(s);
-            return KNOWN_BRANCHES.includes(normalized);
-          });
-        }
+            for (let i = startRow; i < jsonData.length; i++) {
+              const row = jsonData[i];
+              if (!row || row.length === 0 || row.every((cell) => cell === ""))
+                continue;
 
-        sheetsToProcess.forEach((sheetName) => {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, {
-            header: 1,
-            defval: "",
-          });
+              try {
+                let item: LogisticsData;
 
-          const normalizedSucursal = normalizeSucursalName(sheetName);
-          const isTucSuc = normalizedSucursal === "Tucuman";
-          const assignedSucursal = isSingleDataSheet ? "PENDING_SUCURSAL" : normalizedSucursal;
+                if (headerRowIdx !== -1) {
+                  const getVal = (keys: string[]) => {
+                    for (const key of keys) {
+                      const idx = colMap[key.toLowerCase().replace(/\s+/g, "")];
+                      if (idx !== undefined) return row[idx];
+                    }
+                    return undefined;
+                  };
 
-          // Find header row and map columns
-          let headerRowIdx = -1;
-          const colMap: Record<string, number> = {};
-          
-          for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
-            const row = jsonData[i];
-            if (!Array.isArray(row)) continue;
-            
-            const rowStr = row.map(c => String(c || "").toLowerCase().trim().replace(/\s+/g, ""));
-            if (rowStr.includes("hojaruta") || rowStr.includes("distribuidor") || rowStr.includes("piezastotal")) {
-              headerRowIdx = i;
-              rowStr.forEach((val, idx) => {
-                if (val) colMap[val] = idx;
-              });
-              break;
-            }
-          }
+                  const piezasTotal = Number(getVal(["piezasTotal", "piezas Total", "cantidad de id piezas a gestionar", "piezas a gestionar"])) || 0;
+                  const bultosTotal = Number(getVal(["bultosTotal", "bultos Total", "cantidad de bultos a gestionar", "bultos a gestionar"])) || 0;
+                  const distribuidor = normalizeString(getVal(["distribuidor", "nombre completo del movil", "movil"]));
+                  const cliente = normalizeString(getVal(["cliente", "clientes", "nombre del cliente"]));
+                  if (!distribuidor) continue;
 
-          const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 4;
+                  totalPiezasExcel += piezasTotal;
+                  totalBultosExcel += bultosTotal;
 
-          for (let i = startRow; i < jsonData.length; i++) {
-            const row = jsonData[i];
-            if (!row || row.length === 0 || row.every((cell) => cell === ""))
-              continue;
+                  const fecha = normalizeDate(getVal(["fecha", "fecha de gestion"]));
 
-            try {
-              let item: LogisticsData;
+                  const obs = String(getVal(["observaciones", "obs", "comentarios"]) || "");
 
-              if (headerRowIdx !== -1) {
-                // Use header mapping
-                const getVal = (keys: string[]) => {
-                  for (const key of keys) {
-                    const idx = colMap[key.toLowerCase().replace(/\s+/g, "")];
-                    if (idx !== undefined) return row[idx];
-                  }
-                  return undefined;
-                };
+                  const piezasEntregadas = Number(getVal(["piezasEntregadas", "piezas Entregadas", "cantidad de piezas entregas", "entregadas"])) || 0;
+                  const piezasNoEntregadas = Number(getVal(["piezasNoEntregadas", "piezas No Entregadas", "cantidad de no entregas", "no entregas"])) || 0;
+                  const bultosEntregados = Number(getVal(["bultosEntregados", "bultos entregado"])) || 0;
+                  const bultosDevueltos = Number(getVal(["bultosDevueltos", "bultos devueltos"])) || 0;
 
-                const piezasTotal = Number(getVal(["piezasTotal", "piezas Total", "cantidad de id piezas a gestionar", "piezas a gestionar"])) || 0;
-                const bultosTotal = Number(getVal(["bultosTotal", "bultos Total", "cantidad de bultos a gestionar", "bultos a gestionar"])) || 0;
-                const distribuidor = normalizeString(getVal(["distribuidor", "nombre completo del movil", "movil"]));
-                if (!distribuidor) continue;
+                  item = {
+                    fecha: fecha,
+                    distribuidor: distribuidor,
+                    cliente: cliente || "N/A",
+                    vehiculo: parseVehiculo(String(getVal(["vehiculo", "tipo de vehiculo marca", "tipo vehiculo"]) || ""), obs),
+                    hojaRuta: normalizeHojaRuta(getVal(["hojaRuta", "hoja de ruta", "hojas de ruta numero", "ruta"])),
+                    retiros: Number(getVal(["retiros"])) || 0,
+                    piezasTotal: piezasTotal,
+                    bultosTotal: bultosTotal,
+                    palets: Number(getVal(["palets"])) || 0,
+                    peso: Number(getVal(["peso", "kg transportado", "kg"])) || 0,
+                    zona: parseZona(String(getVal(["zona", "zonas cap-int", "zonas"]) || ""), obs),
+                    piezasEntregadas: piezasEntregadas,
+                    piezasNoEntregadas: piezasNoEntregadas,
+                    piezasSinNovedad: piezasEntregadas,
+                    visitadasNovedad: Number(getVal(["visitadasNovedad", "visitadas Novedad", "visitadas con novedad"])) || 0,
+                    noVisitadas: Number(getVal(["noVisitadas"])) || 0,
+                    bultosEntregados: bultosEntregados,
+                    bultosDevueltos: bultosDevueltos,
+                    bultosNoEntregados: bultosDevueltos,
+                    costoTotal: parseCurrency(getVal(["costoTotal", "costo total jornal o pieza", "costo"])),
+                    presupuesto: Number(getVal(["presupuesto"])) || presupuestosMap[assignedSucursal],
+                    observaciones: obs,
+                    sucursal: assignedSucursal,
+                  };
+                } else {
+                  const offset = isTucSuc ? 1 : 0;
+                  const piezasTotal = Number(row[4 + offset]) || 0;
+                  const bultosTotal = Number(row[5 + offset]) || 0;
+                  const distribuidor = String(row[1] || "").trim();
+                  if (!distribuidor) continue;
 
-                totalPiezasExcel += piezasTotal;
-                totalBultosExcel += bultosTotal;
+                  totalPiezasExcel += piezasTotal;
+                  totalBultosExcel += bultosTotal;
 
-                let fecha = "";
-                const rawFecha = getVal(["fecha", "fecha de gestion"]);
-                if (rawFecha) {
-                  if (rawFecha instanceof Date) {
-                    fecha = rawFecha.toLocaleDateString("es-AR");
-                  } else {
-                    fecha = String(rawFecha);
-                  }
+                  const fecha = normalizeDate(row[0]);
+
+                  const colQ = String(row[16 + offset] || "");
+
+                  const piezasEntregadasLegacy = Number(row[9 + offset]) || 0;
+                  const piezasNoEntregadasLegacy = Number(row[10 + offset]) || 0;
+                  const bultosEntregadosLegacy = Number(row[13 + offset]) || 0;
+                  const bultosDevueltosLegacy = Number(row[14 + offset]) || 0;
+
+                  item = {
+                    fecha: fecha,
+                    distribuidor: distribuidor,
+                    cliente: "N/A",
+                    vehiculo: parseVehiculo(String(row[2] || ""), colQ),
+                    hojaRuta: String(row[3] || ""),
+                    retiros: isTucSuc ? Number(row[4]) || 0 : 0,
+                    piezasTotal: piezasTotal,
+                    bultosTotal: bultosTotal,
+                    palets: Number(row[6 + offset]) || 0,
+                    peso: Number(row[7 + offset]) || 0,
+                    zona: parseZona(String(row[8 + offset] || ""), colQ),
+                    piezasEntregadas: piezasEntregadasLegacy,
+                    piezasNoEntregadas: piezasNoEntregadasLegacy,
+                    piezasSinNovedad: piezasEntregadasLegacy,
+                    visitadasNovedad: Number(row[11 + offset]) || 0,
+                    noVisitadas: Number(row[12 + offset]) || 0,
+                    bultosEntregados: bultosEntregadosLegacy,
+                    bultosDevueltos: bultosDevueltosLegacy,
+                    bultosNoEntregados: bultosDevueltosLegacy,
+                    costoTotal: parseCurrency(row[15 + offset]),
+                    presupuesto: presupuestosMap[assignedSucursal],
+                    observaciones: colQ,
+                    sucursal: assignedSucursal,
+                  };
                 }
 
-                const obs = String(getVal(["observaciones", "obs", "comentarios"]) || "");
-
-                const piezasEntregadas = Number(getVal(["piezasEntregadas", "piezas Entregadas", "cantidad de piezas entregas", "entregadas"])) || 0;
-                const piezasNoEntregadas = Number(getVal(["piezasNoEntregadas", "piezas No Entregadas", "cantidad de no entregas", "no entregas"])) || 0;
-                const bultosEntregados = Number(getVal(["bultosEntregados", "bultos entregado"])) || 0;
-                const bultosDevueltos = Number(getVal(["bultosDevueltos", "bultos devueltos"])) || 0;
-
-                item = {
-                  fecha: fecha,
-                  distribuidor: distribuidor,
-                  vehiculo: parseVehiculo(String(getVal(["vehiculo", "tipo de vehiculo marca", "tipo vehiculo"]) || ""), obs),
-                  hojaRuta: normalizeHojaRuta(getVal(["hojaRuta", "hoja de ruta", "hojas de ruta numero", "ruta"])),
-                  retiros: Number(getVal(["retiros"])) || 0,
-                  piezasTotal: piezasTotal,
-                  bultosTotal: bultosTotal,
-                  palets: Number(getVal(["palets"])) || 0,
-                  peso: Number(getVal(["peso", "kg transportado", "kg"])) || 0,
-                  zona: parseZona(String(getVal(["zona", "zonas cap-int", "zonas"]) || ""), obs),
-                  piezasEntregadas: piezasEntregadas,
-                  piezasNoEntregadas: piezasNoEntregadas,
-                  piezasSinNovedad: piezasEntregadas, // Mapping to piezasEntregadas
-                  visitadasNovedad: Number(getVal(["visitadasNovedad", "visitadas Novedad", "visitadas con novedad"])) || 0,
-                  noVisitadas: Number(getVal(["noVisitadas"])) || 0,
-                  bultosEntregados: bultosEntregados,
-                  bultosDevueltos: bultosDevueltos,
-                  bultosNoEntregados: bultosDevueltos, // Mapping to bultosDevueltos
-                  costoTotal: Number(getVal(["costoTotal", "costo total jornal o pieza", "costo"])) || 0,
-                  presupuesto: Number(getVal(["presupuesto"])) || presupuestosMap[assignedSucursal],
-                  observaciones: obs,
-                  sucursal: assignedSucursal,
-                };
-              } else {
-                // Fallback to legacy fixed-index logic
-                const offset = isTucSuc ? 1 : 0;
-                const piezasTotal = Number(row[4 + offset]) || 0;
-                const bultosTotal = Number(row[5 + offset]) || 0;
-                const distribuidor = String(row[1] || "").trim();
-                if (!distribuidor) continue;
-
-                totalPiezasExcel += piezasTotal;
-                totalBultosExcel += bultosTotal;
-
-                let fecha = "";
-                if (row[0]) {
-                  if (row[0] instanceof Date) {
-                    fecha = row[0].toLocaleDateString("es-AR");
-                  } else {
-                    fecha = String(row[0]);
-                  }
-                }
-
-                const colQ = String(row[16 + offset] || "");
-
-                const piezasEntregadasLegacy = Number(row[9 + offset]) || 0;
-                const piezasNoEntregadasLegacy = Number(row[10 + offset]) || 0;
-                const bultosEntregadosLegacy = Number(row[13 + offset]) || 0;
-                const bultosDevueltosLegacy = Number(row[14 + offset]) || 0;
-
-                item = {
-                  fecha: fecha,
-                  distribuidor: distribuidor,
-                  vehiculo: parseVehiculo(String(row[2] || ""), colQ),
-                  hojaRuta: String(row[3] || ""),
-                  retiros: isTucSuc ? Number(row[4]) || 0 : 0,
-                  piezasTotal: piezasTotal,
-                  bultosTotal: bultosTotal,
-                  palets: Number(row[6 + offset]) || 0,
-                  peso: Number(row[7 + offset]) || 0,
-                  zona: parseZona(String(row[8 + offset] || ""), colQ),
-                  piezasEntregadas: piezasEntregadasLegacy,
-                  piezasNoEntregadas: piezasNoEntregadasLegacy,
-                  piezasSinNovedad: piezasEntregadasLegacy,
-                  visitadasNovedad: Number(row[11 + offset]) || 0,
-                  noVisitadas: Number(row[12 + offset]) || 0,
-                  bultosEntregados: bultosEntregadosLegacy,
-                  bultosDevueltos: bultosDevueltosLegacy,
-                  bultosNoEntregados: bultosDevueltosLegacy,
-                  costoTotal: Number(row[15 + offset]) || 0,
-                  presupuesto: presupuestosMap[assignedSucursal],
-                  observaciones: colQ,
-                  sucursal: assignedSucursal,
-                };
+                parsedData.push(item);
+              } catch (err) {
+                console.error("Error parsing row", i, err);
               }
-
-              parsedData.push(item);
-            } catch (err) {
-              console.error("Error parsing row", i, err);
             }
-          }
-        });
+          });
+        }
 
         setProgress(90);
 
@@ -388,7 +380,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
       }
     };
 
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleDrop = useCallback(

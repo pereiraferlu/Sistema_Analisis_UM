@@ -101,10 +101,12 @@ export default function ValidationModal({
       const correction = corrections[index] || {};
       const isAllDelivered = allDeliveredIndices.has(index);
       const isAllNovelty = allNoveltyIndices.has(index);
+      const sucursal = d.sucursal === "PENDING_SUCURSAL" ? selectedSucursal : d.sucursal;
 
       const finalItem = {
         ...d,
         ...correction,
+        sucursal,
         vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
         zona: normalizeZone(d.zona) || zoneMapping[d.zona] || d.zona,
       } as LogisticsData;
@@ -127,28 +129,32 @@ export default function ValidationModal({
 
       return finalItem;
     });
-  }, [data, vehicleMapping, zoneMapping, corrections, allDeliveredIndices, allNoveltyIndices]);
+  }, [data, vehicleMapping, zoneMapping, corrections, allDeliveredIndices, allNoveltyIndices, selectedSucursal]);
 
   const initialDiscrepancyIndices = useMemo(() => {
     return data.map((d, index) => {
-      const correction = corrections[index] || {};
-      
-      const piezasTotal = correction.piezasTotal ?? d.piezasTotal;
-      const bultosTotal = correction.bultosTotal ?? d.bultosTotal;
-      
-      const piezasEntregadas = correction.piezasEntregadas ?? d.piezasEntregadas;
-      const piezasNoEntregadas = correction.piezasNoEntregadas ?? d.piezasNoEntregadas;
-      const bultosEntregados = correction.bultosEntregados ?? d.bultosEntregados;
-      const bultosDevueltos = correction.bultosDevueltos ?? d.bultosDevueltos;
-
-      const hasQuantityError = (piezasEntregadas + piezasNoEntregadas !== piezasTotal) ||
-                               (bultosEntregados + bultosDevueltos !== bultosTotal);
-      const hasBultosPiezasError = bultosTotal < piezasTotal || 
-                                   bultosEntregados < piezasEntregadas || 
-                                   bultosDevueltos < piezasNoEntregadas;
+      const hasQuantityError = (d.piezasEntregadas + d.piezasNoEntregadas !== d.piezasTotal) ||
+                               (d.bultosEntregados + d.bultosDevueltos !== d.bultosTotal);
+      const hasBultosPiezasError = d.bultosTotal < d.piezasTotal || 
+                                   d.bultosEntregados < d.piezasEntregadas || 
+                                   d.bultosDevueltos < d.piezasNoEntregadas;
       return (hasQuantityError || hasBultosPiezasError) ? index : -1;
     }).filter(idx => idx !== -1);
-  }, [data, corrections]);
+  }, [data]);
+
+  const pendingQuantityDiscrepancies = useMemo(() => {
+    return mappedData.map((d, index) => {
+      if (!initialDiscrepancyIndices.includes(index)) return -1;
+      if (excludedIndices.has(index)) return -1;
+      
+      const hasQuantityError = (d.piezasEntregadas + d.piezasNoEntregadas !== d.piezasTotal) ||
+                               (d.bultosEntregados + d.bultosDevueltos !== d.bultosTotal);
+      const hasBultosPiezasError = d.bultosTotal < d.piezasTotal || 
+                                   d.bultosEntregados < d.piezasEntregadas || 
+                                   d.bultosDevueltos < d.piezasNoEntregadas;
+      return (hasQuantityError || hasBultosPiezasError) ? index : -1;
+    }).filter(idx => idx !== -1);
+  }, [mappedData, excludedIndices, initialDiscrepancyIndices]);
 
   const quantityDiscrepancies = useMemo(() => {
     return initialDiscrepancyIndices.map(index => ({
@@ -167,17 +173,20 @@ export default function ValidationModal({
 
   const initialNovedadDiscrepancyIndices = useMemo(() => {
     return data.map((d, index) => {
-      const correction = corrections[index] || {};
-
-      const piezasTotal = correction.piezasTotal ?? d.piezasTotal;
-      const visitadasNovedad = correction.visitadasNovedad ?? d.visitadasNovedad;
-      const noVisitadas = correction.noVisitadas ?? d.noVisitadas;
-
-      // The user's logic: visitadasNovedad + noVisitadas must equal piezasTotal
-      const hasNovedadError = (visitadasNovedad + noVisitadas !== piezasTotal);
+      const hasNovedadError = (d.visitadasNovedad + d.noVisitadas !== d.piezasTotal);
       return hasNovedadError ? index : -1;
     }).filter(idx => idx !== -1);
-  }, [data, corrections]);
+  }, [data]);
+
+  const pendingNovedadDiscrepancies = useMemo(() => {
+    return mappedData.map((d, index) => {
+      if (!initialNovedadDiscrepancyIndices.includes(index)) return -1;
+      if (excludedIndices.has(index)) return -1;
+      
+      const hasNovedadError = (d.visitadasNovedad + d.noVisitadas !== d.piezasTotal);
+      return hasNovedadError ? index : -1;
+    }).filter(idx => idx !== -1);
+  }, [mappedData, excludedIndices, initialNovedadDiscrepancyIndices]);
 
   const novedadDiscrepancies = useMemo(() => {
     return initialNovedadDiscrepancyIndices.map(index => ({
@@ -190,13 +199,50 @@ export default function ValidationModal({
     return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.visitadasNovedad !== undefined || c.noVisitadas !== undefined).length;
   }, [corrections]);
 
+  const modifiedRoutesCount = useMemo(() => {
+    return data.filter((d, index) => {
+      if (excludedIndices.has(index)) return false;
+      const m = mappedData[index];
+      return (
+        d.piezasTotal !== m.piezasTotal ||
+        d.piezasEntregadas !== m.piezasEntregadas ||
+        d.piezasNoEntregadas !== m.piezasNoEntregadas ||
+        d.bultosTotal !== m.bultosTotal ||
+        d.bultosEntregados !== m.bultosEntregados ||
+        d.bultosDevueltos !== m.bultosDevueltos ||
+        d.visitadasNovedad !== m.visitadasNovedad ||
+        d.noVisitadas !== m.noVisitadas ||
+        d.vehiculo !== m.vehiculo ||
+        d.zona !== m.zona
+      );
+    }).length;
+  }, [data, mappedData, excludedIndices]);
+
+  const totalNovedadesCorregidas = useMemo(() => {
+    const pendingQuantitySet = new Set(pendingQuantityDiscrepancies);
+    const pendingNovedadSet = new Set(pendingNovedadDiscrepancies);
+    
+    const allInitialDiscrepancies = new Set([
+      ...initialDiscrepancyIndices,
+      ...initialNovedadDiscrepancyIndices
+    ]);
+    
+    return Array.from(allInitialDiscrepancies)
+      .filter(idx => 
+        !excludedIndices.has(idx) && 
+        !pendingQuantitySet.has(idx) && 
+        !pendingNovedadSet.has(idx)
+      )
+      .reduce((acc, idx) => acc + mappedData[idx].piezasTotal, 0);
+  }, [initialDiscrepancyIndices, initialNovedadDiscrepancyIndices, pendingQuantityDiscrepancies, pendingNovedadDiscrepancies, excludedIndices, mappedData]);
+
   useEffect(() => {
     // Initial step determination
     if (isPending) {
       setStep('branch_selection');
-    } else if (quantityDiscrepancies.length > 0) {
+    } else if (pendingQuantityDiscrepancies.length > 0) {
       setStep('quantity_validation');
-    } else if (novedadDiscrepancies.length > 0) {
+    } else if (pendingNovedadDiscrepancies.length > 0) {
       setStep('novedad_validation');
     } else if (needsMapping) {
       setStep('mapping');
@@ -209,7 +255,11 @@ export default function ValidationModal({
     }
   }, []); // Only on mount to set initial step
 
-  const sucursalesEnArchivo = Array.from(new Set(mappedData.map(d => d.sucursal).filter(s => s !== "PENDING_SUCURSAL")));
+  const sucursalesEnArchivo = useMemo(() => {
+    const sucs = new Set(mappedData.map(d => d.sucursal));
+    if (isPending) sucs.add(selectedSucursal);
+    return Array.from(sucs).filter(s => s !== "PENDING_SUCURSAL");
+  }, [mappedData, isPending, selectedSucursal]);
   
   const hasExistingPresupuestos = existingPresupuestos && Object.keys(existingPresupuestos).length > 0;
   
@@ -281,25 +331,25 @@ export default function ValidationModal({
       existingMap.set(getRouteId(d), d);
     });
 
-    mappedData.forEach(incoming => {
-      const sucursal = isPending ? selectedSucursal : incoming.sucursal;
-      const incomingWithSucursal = { ...incoming, sucursal };
-      const id = getRouteId(incomingWithSucursal);
+    mappedData.forEach((incoming, index) => {
+      if (excludedIndices.has(index)) return;
+      
+      const id = getRouteId(incoming);
       const existing = existingMap.get(id);
 
       if (existing) {
-        if (areRoutesEqual(existing, incomingWithSucursal)) {
-          dups.push(incomingWithSucursal);
+        if (areRoutesEqual(existing, incoming)) {
+          dups.push(incoming);
         } else {
-          confs.push({ id, existing, incoming: incomingWithSucursal });
+          confs.push({ id, existing, incoming });
         }
       } else {
-        news.push(incomingWithSucursal);
+        news.push(incoming);
       }
     });
 
     return { duplicates: dups, conflicts: confs, newRoutes: news };
-  }, [mappedData, existingData, isPending, selectedSucursal, step]);
+  }, [mappedData, existingData, isPending, selectedSucursal, step, excludedIndices]);
 
   useEffect(() => {
     if (step === 'conflicts' || step === 'validation') {
@@ -323,10 +373,8 @@ export default function ValidationModal({
 
   const uniqueDistribuidores = new Set(mappedData.map((d) => d.distribuidor)).size;
   const uniqueSucursales = isPending ? 1 : new Set(mappedData.map((d) => d.sucursal)).size;
-  const totalPiezas =
-    totals?.piezas ?? mappedData.reduce((acc, curr) => acc + curr.piezasTotal, 0);
-  const totalBultos =
-    totals?.bultos ?? mappedData.reduce((acc, curr) => acc + curr.bultosTotal, 0);
+  const totalPiezas = mappedData.filter((_, idx) => !excludedIndices.has(idx)).reduce((acc, curr) => acc + curr.piezasTotal, 0);
+  const totalBultos = mappedData.filter((_, idx) => !excludedIndices.has(idx)).reduce((acc, curr) => acc + curr.bultosTotal, 0);
 
   useEffect(() => {
     if (step === 'budget_validation') {
@@ -351,23 +399,76 @@ export default function ValidationModal({
   }, [unknownZonesWithDetails]);
 
   const handleConfirm = () => {
+    if (step === 'quantity_validation' && pendingQuantityDiscrepancies.length > 0) {
+      // Automatically exclude routes that weren't corrected
+      const newExcluded = new Set(excludedIndices);
+      pendingQuantityDiscrepancies.forEach(idx => newExcluded.add(idx));
+      setExcludedIndices(newExcluded);
+      
+      // After excluding, we determine the next step
+      // We need to calculate what the next step would be IF these were excluded
+      const nextStepAfterExclusion = (currentStep: string): any => {
+        if (currentStep === 'quantity_validation') {
+          if (pendingNovedadDiscrepancies.filter(idx => !newExcluded.has(idx)).length > 0) return 'novedad_validation';
+          if (needsMapping) return 'mapping';
+          if (hasDifferentPresupuestos) return 'budget_validation';
+          if (conflicts.length > 0) return 'conflicts';
+          return 'validation';
+        }
+        return null;
+      };
+      
+      const next = nextStepAfterExclusion(step);
+      if (next) {
+        setStepHistory(prev => [...prev, step]);
+        setStep(next);
+        return;
+      }
+    }
+
+    if (step === 'novedad_validation' && pendingNovedadDiscrepancies.length > 0) {
+      // Automatically exclude routes that weren't corrected
+      const newExcluded = new Set(excludedIndices);
+      pendingNovedadDiscrepancies.forEach(idx => newExcluded.add(idx));
+      setExcludedIndices(newExcluded);
+
+      const nextStepAfterExclusion = (currentStep: string): any => {
+        if (currentStep === 'novedad_validation') {
+          if (needsMapping) return 'mapping';
+          if (hasDifferentPresupuestos) return 'budget_validation';
+          if (conflicts.length > 0) return 'conflicts';
+          return 'validation';
+        }
+        return null;
+      };
+
+      const next = nextStepAfterExclusion(step);
+      if (next) {
+        setStepHistory(prev => [...prev, step]);
+        setStep(next);
+        return;
+      }
+    }
+
     const nextStep = (currentStep: string): any => {
       if (currentStep === 'branch_selection') {
-        if (quantityDiscrepancies.length > 0) return 'quantity_validation';
-        if (novedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
+        if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
         if (needsMapping) return 'mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
       }
       if (currentStep === 'quantity_validation') {
-        if (novedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
+        if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
         if (needsMapping) return 'mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
       }
       if (currentStep === 'novedad_validation') {
+        if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
         if (needsMapping) return 'mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
@@ -715,11 +816,6 @@ export default function ValidationModal({
                             <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
                               HDR: {item.hojaRuta}
                             </span>
-                            {!isCollapsed && (
-                              <div className={`text-[10px] font-bold px-2 py-0.5 rounded ${hasError ? 'bg-danger-100 text-danger-600' : 'bg-success-100 text-success-600'}`}>
-                                {hasError ? `Diferencia: ${diff > 0 ? '+' : ''}${diff} (Suma: ${sum} / Total: ${piezasTotal})` : 'Corregido'}
-                              </div>
-                            )}
                           </div>
 
                           <div className="flex flex-col items-end space-y-2">
@@ -1020,6 +1116,9 @@ export default function ValidationModal({
                           <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
                             Ruta: {c.incoming.hojaRuta}
                           </span>
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                            Cliente: {c.incoming.cliente || "N/A"}
+                          </span>
                         </div>
 
                         <div className="space-y-4">
@@ -1080,32 +1179,23 @@ export default function ValidationModal({
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {[
-                  { label: "Rutas extraídas", value: mappedData.length },
-                  { label: "Distribuidores", value: uniqueDistribuidores },
-                  { label: "Sucursales", value: uniqueSucursales },
-                  { label: "Piezas Totales", value: totalPiezas },
-                  { label: "Bultos Totales", value: totalBultos },
-                  { label: "Sucursales detectadas", value: sucursalesEnArchivo.length > 0 ? sucursalesEnArchivo.join(", ") : "Ninguna" },
                   { 
-                    label: "Presupuestos", 
-                    value: budgetStatus.text,
-                    colorClass: budgetStatus.color
+                    label: `Sucursales detectadas (${sucursalesEnArchivo.length})`, 
+                    value: sucursalesEnArchivo.length > 0 ? sucursalesEnArchivo.join(", ") : "Ninguna" 
                   },
-                  { 
-                    label: "Rutas duplicadas detectadas", 
-                    value: duplicates.length,
-                    colorClass: duplicates.length > 0 ? "text-amber-600" : "text-secondary-500"
-                  },
+                  { label: "Rutas encontradas", value: mappedData.length },
                   { 
                     label: "Rutas agregadas", 
                     value: newRoutes.length,
                     colorClass: newRoutes.length > 0 ? "text-primary-600" : "text-secondary-500"
                   },
                   { 
-                    label: "Rutas modificadas", 
-                    value: conflicts.length,
-                    colorClass: conflicts.length > 0 ? "text-indigo-600" : "text-secondary-500"
+                    label: "Rutas duplicadas detectadas", 
+                    value: duplicates.length,
+                    colorClass: duplicates.length > 0 ? "text-amber-600" : "text-secondary-500"
                   },
+                  { label: "Rutas modificadas", value: modifiedRoutesCount },
+                  { label: "Piezas cargadas", value: totalPiezas },
                   { 
                     label: "Cantidad piezas corregidas", 
                     value: correctedPiezasCount,
@@ -1115,6 +1205,13 @@ export default function ValidationModal({
                     label: "Cantidad bultos corregidos", 
                     value: correctedBultosCount,
                     colorClass: correctedBultosCount > 0 ? "text-primary-600" : "text-secondary-500"
+                  },
+                  { label: "Cantidad de novedades corregidas", value: totalNovedadesCorregidas },
+                  { label: "Distribuidores cargados", value: new Set(mappedData.filter((_, idx) => !excludedIndices.has(idx)).map(d => d.distribuidor)).size },
+                  { 
+                    label: "Presupuestos", 
+                    value: budgetStatus.text,
+                    colorClass: budgetStatus.color
                   },
                 ].map((item, index) => (
                   <div
