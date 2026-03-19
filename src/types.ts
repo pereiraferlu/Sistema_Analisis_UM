@@ -20,6 +20,7 @@ export interface LogisticsData {
   costoTotal: number; // COSTO TOTAL - JORNAL O PIEZA
   presupuesto?: number; // PRESUPUESTO ESTABLECIDO
   observaciones: string; // OBSERVACIONES
+  cliente: string; // CLIENTES
   sucursal: string; // Derived from sheet name
 }
 

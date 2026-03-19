@@ -34,6 +34,7 @@ export const getDifferences = (a: LogisticsData, b: LogisticsData) => {
   };
 
   check("distribuidor", "Distribuidor", a.distribuidor, b.distribuidor);
+  check("cliente", "Cliente", a.cliente, b.cliente);
   check("vehiculo", "Vehículo", a.vehiculo, b.vehiculo);
   check("zona", "Zona", a.zona, b.zona);
   check("observaciones", "Observaciones", a.observaciones, b.observaciones);
@@ -55,17 +56,102 @@ export const getDifferences = (a: LogisticsData, b: LogisticsData) => {
   return diffs;
 };
 
-export const normalizeDate = (dateStr: string) => {
-  if (!dateStr) return "";
-  // Try to normalize d/m/yyyy to dd/mm/yyyy or similar
-  const parts = dateStr.split("/");
-  if (parts.length === 3) {
-    const day = parts[0].padStart(2, "0");
-    const month = parts[1].padStart(2, "0");
-    const year = parts[2];
-    return `${day}/${month}/${year}`;
+export const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+export const normalizeDate = (val: any) => {
+  if (!val) return "";
+  
+  let date: Date | null = null;
+
+  // Handle Excel serial date (number or numeric string)
+  const numVal = Number(val);
+  if (!isNaN(numVal) && typeof val !== 'boolean' && /^\d{5}(\.\d+)?$/.test(String(val))) {
+    // Excel base date is Dec 30, 1899. 
+    // We use UTC to avoid timezone shifts that can move the date to the previous day.
+    date = new Date(Math.round((numVal - 25569) * 86400 * 1000));
+  } else if (val instanceof Date) {
+    // If it's already a Date object, we'll treat it as UTC to stay consistent
+    date = val;
+  } else {
+    const dateStr = String(val).trim();
+    if (!dateStr) return "";
+
+    // Try parsing common formats
+    // dd/mm/yyyy or dd-mm-yyyy or dd-mmm-yyyy or yyyy-mm-dd
+    const parts = dateStr.split(/[\/\-\s]/);
+    if (parts.length >= 2) {
+      let d, m, y;
+      if (parts[0].length === 4) {
+        // yyyy-mm-dd
+        y = parseInt(parts[0]);
+        m = parseInt(parts[1]) - 1;
+        d = parseInt(parts[2] || "1");
+      } else {
+        // dd/mm/yyyy
+        d = parseInt(parts[0]);
+        m = parseInt(parts[1]) - 1;
+
+        // If month is not a number, try to find it in MONTHS
+        if (isNaN(m) && parts[1]) {
+          const monthStr = parts[1].toLowerCase().substring(0, 3);
+          m = MONTHS.indexOf(monthStr);
+        }
+
+        y = new Date().getFullYear();
+        if (parts.length === 3) {
+          y = parseInt(parts[2]);
+          if (y < 100) y += 2000;
+        }
+      }
+      
+      if (!isNaN(d) && !isNaN(m) && m >= 0 && m <= 11) {
+        // Create date in UTC to avoid local timezone issues
+        date = new Date(Date.UTC(y, m, d));
+      }
+    }
+    
+    if (!date || isNaN(date.getTime())) {
+      // Fallback to native parsing
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed.getTime())) {
+        date = parsed;
+      }
+    }
   }
-  return dateStr;
+
+  if (date && !isNaN(date.getTime())) {
+    // We use UTC methods to ensure the day doesn't shift due to local timezone
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const y = String(date.getUTCFullYear()).slice(-2);
+    return `${d}-${m}-${y}`;
+  }
+
+  return String(val);
+};
+
+export const parseNormalizedDate = (dateStr: string) => {
+  if (!dateStr) return new Date(0);
+  const parts = dateStr.split("-");
+  
+  // Handle dd-mm-aa
+  if (parts.length === 3) {
+    const d = parseInt(parts[0]);
+    const m = parseInt(parts[1]) - 1;
+    let y = parseInt(parts[2]);
+    if (y < 100) y += 2000;
+    // Return a UTC date for consistency
+    return new Date(Date.UTC(y, m, d));
+  }
+
+  // Handle old dd-mon format
+  if (parts.length === 2) {
+    const day = parseInt(parts[0]);
+    const monthIdx = MONTHS.indexOf(parts[1].toLowerCase());
+    if (monthIdx !== -1) return new Date(Date.UTC(new Date().getFullYear(), monthIdx, day));
+  }
+
+  return new Date(dateStr);
 };
 
 export const normalizeHojaRuta = (val: any) => {
