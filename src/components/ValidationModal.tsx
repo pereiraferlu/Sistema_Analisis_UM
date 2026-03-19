@@ -12,6 +12,7 @@ interface ValidationModalProps {
   pendingPresupuestos?: Record<string, number>;
   onConfirm: (data: LogisticsData[], newPresupuestos?: Record<string, number>, overwritePresupuestos?: boolean, idsToRemove?: string[]) => void;
   onCancel: () => void;
+  missingColumns?: string[];
 }
 
 const KNOWN_BRANCHES = [
@@ -44,6 +45,7 @@ export default function ValidationModal({
   pendingPresupuestos,
   onConfirm,
   onCancel,
+  missingColumns = [],
 }: ValidationModalProps) {
   const [selectedSucursal, setSelectedSucursal] = useState(KNOWN_BRANCHES[0]);
   const [budgetResolutions, setBudgetResolutions] = useState<Record<string, 'replace' | 'keep'>>({});
@@ -84,8 +86,8 @@ export default function ValidationModal({
       }).length;
   }, [pendingPresupuestos, selectedSucursal, existingPresupuestos]);
 
-  const [step, setStep] = useState<'quantity_validation' | 'novedad_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
-    'quantity_validation'
+  const [step, setStep] = useState<'missing_columns' | 'quantity_validation' | 'novedad_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
+    missingColumns.length > 0 ? 'missing_columns' : 'quantity_validation'
   );
   const [stepHistory, setStepHistory] = useState<string[]>([]);
 
@@ -451,6 +453,14 @@ export default function ValidationModal({
     }
 
     const nextStep = (currentStep: string): any => {
+      if (currentStep === 'missing_columns') {
+        if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
+        if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (needsMapping) return 'mapping';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
       if (currentStep === 'branch_selection') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
@@ -581,7 +591,52 @@ export default function ValidationModal({
         </div>
 
         <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
-          {step === 'quantity_validation' ? (
+          {step === 'missing_columns' ? (
+            <div className="space-y-6">
+              <div className="p-6 bg-danger-50 rounded-2xl border border-danger-200">
+                <div className="flex items-center space-x-3 mb-6 text-danger-700">
+                  <XCircle className="w-8 h-8" />
+                  <h3 className="text-xl font-bold tracking-tight">Columnas Faltantes en Archivo Consolidado</h3>
+                </div>
+                
+                <div className="bg-white rounded-xl border border-danger-100 p-6 shadow-sm mb-6">
+                  <p className="text-secondary-700 mb-6 leading-relaxed">
+                    Se ha detectado que el archivo cargado es un <span className="font-bold text-secondary-900">Archivo Consolidado</span>, pero no se han encontrado las siguientes columnas o datos críticos:
+                  </p>
+                  
+                  <div className="grid grid-cols-1 gap-3">
+                    {missingColumns.map((col, idx) => (
+                      <div key={idx} className="flex items-center space-x-3 p-3 bg-danger-50/50 rounded-lg border border-danger-100">
+                        <div className="w-2 h-2 rounded-full bg-danger-500 flex-shrink-0" />
+                        <span className="text-sm font-bold text-danger-900 uppercase tracking-wide">{col}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
+                  <div className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
+                    <div className="space-y-2">
+                      <p className="text-sm font-bold text-amber-900 uppercase tracking-tight">Instrucciones de Corrección:</p>
+                      <ul className="text-xs text-amber-800 space-y-1 list-disc pl-4">
+                        <li>Asegúrese de que el archivo tenga la estructura exacta exportada por el sistema.</li>
+                        <li>La columna <span className="font-bold">Vehículo</span> debe estar en la <span className="font-bold text-secondary-900 uppercase">Columna D</span>.</li>
+                        <li>La columna <span className="font-bold">Bultos No Entregados / Devueltos</span> debe estar en la <span className="font-bold text-secondary-900 uppercase">Columna N</span>.</li>
+                        <li>Los <span className="font-bold">Presupuestos</span> deben estar en la hoja <span className="font-bold text-secondary-900 uppercase">"General"</span> dentro de la tabla de costos.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="text-center">
+                <p className="text-sm text-secondary-500 italic">
+                  Por favor, corrija el archivo Excel y vuelva a cargarlo para continuar con el análisis.
+                </p>
+              </div>
+            </div>
+          ) : step === 'quantity_validation' ? (
             <div className="space-y-6">
               <div className="p-4 bg-danger-50 rounded-xl border border-danger-200">
                 <div className="flex items-center space-x-2 mb-4 text-danger-700">
@@ -1328,7 +1383,12 @@ export default function ValidationModal({
 
           <button
             onClick={handleConfirm}
-            className="inline-flex justify-center items-center px-8 py-2.5 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform active:scale-95 cursor-pointer min-w-[140px]"
+            className={`inline-flex justify-center items-center px-8 py-2.5 text-sm font-bold text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform active:scale-95 cursor-pointer min-w-[140px] ${
+              step === 'missing_columns' 
+                ? 'bg-secondary-400 cursor-not-allowed opacity-50' 
+                : 'bg-primary-600 hover:bg-primary-700'
+            }`}
+            disabled={step === 'missing_columns'}
           >
             <CheckCircle2 className="w-4 h-4 mr-2" />
             {step === 'validation' ? 'Confirmar y Finalizar' : 'Continuar'}

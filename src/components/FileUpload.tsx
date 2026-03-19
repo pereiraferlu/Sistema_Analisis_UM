@@ -2,86 +2,195 @@ import React, { useCallback, useState } from "react";
 import * as XLSX from "xlsx";
 import { UploadCloud, AlertCircle, Loader2 } from "lucide-react";
 import { LogisticsData } from "../types";
-import { normalizeZone, normalizeString, normalizeHojaRuta, normalizeDate } from "../utils";
+import { normalizeZone, normalizeString, normalizeHojaRuta, normalizeDate, KNOWN_SUCURSALES, normalizeSucursalName } from "../utils";
 
 interface FileUploadProps {
   onDataLoaded: (
     data: LogisticsData[],
     fileName: string,
     totals?: { piezas: number; bultos: number },
-    presupuestosMap?: Record<string, number>
+    presupuestosMap?: Record<string, number>,
+    missingColumns?: string[]
   ) => void;
 }
 
-const KNOWN_SUCURSALES = ["Tucuman", "Salta", "Jujuy", "Catamarca", "Santiago", "La Rioja"];
 
 function isConsolidatedFile(workbook: XLSX.WorkBook): boolean {
   return workbook.SheetNames.includes("General") &&
-         workbook.SheetNames.some(s => KNOWN_SUCURSALES.includes(s));
+         workbook.SheetNames.some(s => KNOWN_SUCURSALES.includes(normalizeSucursalName(s)));
+}
+
+function normalizeHeader(s: any): string {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
 }
 
 function parseConsolidatedFile(workbook: XLSX.WorkBook): {
   records: LogisticsData[];
   presupuestos: Record<string, number>;
+  missingColumns: string[];
 } {
   const records: LogisticsData[] = [];
   const presupuestos: Record<string, number> = {};
+  const missingColumnsSet = new Set<string>();
 
   // ── 1. Leer presupuestos desde hoja General ──────────────────────────────
   const generalWs = workbook.Sheets["General"];
   if (generalWs) {
+    const ref = generalWs['!ref'] || "A1";
+    const range = XLSX.utils.decode_range(ref);
+    range.s.c = 0; // Force start from column A
+    range.s.r = 0; // Force start from row 1
+    
     const allRows = XLSX.utils.sheet_to_json<any[]>(generalWs, {
       header: 1,
+      range: range,
       defval: null,
     });
-    for (const row of allRows) {
+    
+    let costTableStart = -1;
+    for (let i = 0; i < allRows.length; i++) {
+      const row = allRows[i];
       if (!Array.isArray(row)) continue;
-      const colB = row[1]; 
-      const colC = row[2]; 
-      if (colB && KNOWN_SUCURSALES.includes(String(colB))) {
-        presupuestos[String(colB)] = Number(colC) || 0;
+      
+      // Check first few columns for the title (usually in Col B if Col A is empty)
+      const rowText = row.slice(0, 5).map(c => String(c || "").toUpperCase()).join(" ");
+      if (rowText.includes("DATOS DE COSTOS POR SUCURSAL")) {
+        costTableStart = i + 2; // Table starts 2 rows after title
+        break;
       }
     }
+
+    if (costTableStart !== -1) {
+      for (let i = costTableStart; i < allRows.length; i++) {
+        const row = allRows[i];
+        if (!Array.isArray(row)) continue;
+        
+        // Sucursal name is usually in Col B (index 1)
+        const sucursalCell = row[1]; 
+        if (!sucursalCell) continue;
+        if (String(sucursalCell).toUpperCase() === 'TOTAL') break;
+
+        const normalized = normalizeSucursalName(String(sucursalCell));
+        if (KNOWN_SUCURSALES.includes(normalized)) {
+          // Budget is usually in Col C (index 2)
+          presupuestos[normalized] = parseCurrency(row[2]);
+        }
+      }
+    } else {
+      missingColumnsSet.add("Presupuestos (Hoja General)");
+    }
+  } else {
+    missingColumnsSet.add("Hoja General");
   }
 
   // ── 2. Leer datos de cada hoja de sucursal ───────────────────────────────
   for (const sheetName of workbook.SheetNames) {
     if (sheetName === "General") continue;
-    if (!KNOWN_SUCURSALES.includes(sheetName)) continue;
+    const normalizedSheet = normalizeSucursalName(sheetName);
+    if (!KNOWN_SUCURSALES.includes(normalizedSheet)) continue;
 
     const ws = workbook.Sheets[sheetName];
     if (!ws) continue;
 
-    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, {
-      defval: null,
-      raw: true,
+    const ref = ws['!ref'] || "A1";
+    const range = XLSX.utils.decode_range(ref);
+    range.s.c = 0; // Force start from column A
+    range.s.r = 0; // Force start from row 1
+
+    const jsonData = XLSX.utils.sheet_to_json<any[]>(ws, {
+      header: 1,
+      range: range,
+      defval: "",
     });
 
-    for (const row of rows) {
-      const fechaVal = row['Fecha'];
-      if (fechaVal === 'TOTAL' || fechaVal == null) continue;
-      if (typeof row['Total Piezas'] === 'string') continue;
+    let headerRowIdx = -1;
+    const colMap: Record<string, number> = {};
+    
+    // Buscar fila de encabezado (suele estar en la fila 2, índice 1)
+    for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
+      const row = jsonData[i];
+      if (!Array.isArray(row)) continue;
+      
+      const normalizedRow = row.map(c => normalizeHeader(c));
+      if (normalizedRow.includes("hojaruta") || normalizedRow.includes("distribuidor") || normalizedRow.includes("piezastotal") || normalizedRow.includes("totalpiezas")) {
+        headerRowIdx = i;
+        normalizedRow.forEach((val, idx) => {
+          if (val) colMap[val] = idx;
+        });
+        break;
+      }
+    }
+
+    const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 1;
+
+    // Check for specific columns in consolidated file
+    // Vehiculo should be in Col D (index 3)
+    // Bultos No Entregados should be in Col N (index 13)
+    const hasVehiculoHeader = colMap[normalizeHeader("vehiculo")] !== undefined || 
+                             colMap[normalizeHeader("tipo de vehiculo marca")] !== undefined ||
+                             colMap[normalizeHeader("tipo vehiculo")] !== undefined;
+                             
+    const hasBultosNoEntregadosHeader = colMap[normalizeHeader("bultos no entregados")] !== undefined || 
+                                       colMap[normalizeHeader("bultos devueltos")] !== undefined ||
+                                       colMap[normalizeHeader("bultos no entregados / devueltos")] !== undefined;
+
+    if (!hasVehiculoHeader && (!jsonData[startRow] || jsonData[startRow][3] === undefined || jsonData[startRow][3] === "")) {
+      missingColumnsSet.add("Vehículo (Columna D)");
+    }
+    if (!hasBultosNoEntregadosHeader && (!jsonData[startRow] || jsonData[startRow][13] === undefined || jsonData[startRow][13] === "")) {
+      missingColumnsSet.add("Bultos No Entregados / Devueltos (Columna N)");
+    }
+
+    for (let i = startRow; i < jsonData.length; i++) {
+      const row = jsonData[i];
+      if (!row || row.length === 0 || row.every((cell) => cell === "")) continue;
+
+      const getVal = (keys: string[], fallbackIdx?: number) => {
+        for (const key of keys) {
+          const normalizedKey = normalizeHeader(key);
+          const idx = colMap[normalizedKey];
+          if (idx !== undefined) return row[idx];
+        }
+        // If no header match, use fallback index if provided
+        if (fallbackIdx !== undefined && row[fallbackIdx] !== undefined && row[fallbackIdx] !== "") {
+          return row[fallbackIdx];
+        }
+        return undefined;
+      };
+
+      const fechaVal = getVal(["fecha", "fechagestion"], 1);
+      if (fechaVal === 'TOTAL' || fechaVal == null || fechaVal === "") continue;
+
+      const piezasTotal = Number(getVal(["piezasTotal", "totalpiezas", "piezas Total", "cantidad de id piezas a gestionar", "piezas a gestionar"], 5) ?? 0);
+      const bultosTotal = Number(getVal(["bultosTotal", "totalbultos", "bultos Total", "cantidad de bultos a gestionar", "bultos a gestionar"], 6) ?? 0);
+      
+      const distribuidor = String(getVal(["distribuidor", "nombre completo del movil", "movil"], 2) ?? '');
+      if (!distribuidor) continue;
 
       records.push({
-        sucursal:           sheetName,
-        distribuidor:       String(row['Distribuidor']          ?? ''),
-        vehiculo:           String(row['Vehículo']              ?? ''),
-        hojaRuta:           String(row['Hoja de Ruta']          ?? ''),
-        fecha:              normalizeDate(row['Fecha']),
-        piezasTotal:        Number(row['Total Piezas']          ?? 0),
-        bultosTotal:        Number(row['Total Bultos']          ?? 0),
-        zona:               String(row['Zona']                  ?? ''),
-        piezasEntregadas:   Number(row['Piezas Entregadas']     ?? 0),
-        piezasNoEntregadas: Number(row['Piezas No Entregadas']  ?? 0),
-        visitadasNovedad:   Number(row['Visitadas con Novedad'] ?? 0),
-        noVisitadas:        Number(row['No Visitadas']          ?? 0),
-        bultosEntregados:   Number(row['Bultos Entregados']     ?? 0),
-        bultosNoEntregados: Number(row['Bultos No Entregados']  ?? 0),
-        costoTotal:         Number(row['Costo Total']           ?? 0),
-        observaciones:      String(row['Observaciones']         ?? ''),
+        sucursal:           normalizedSheet,
+        distribuidor:       distribuidor,
+        vehiculo:           String(getVal(['vehiculo', 'tipo de vehiculo marca', 'tipo vehiculo'], 3) ?? ''),
+        hojaRuta:           String(getVal(['hojaRuta', 'hoja de ruta', 'hojas de ruta numero', 'ruta'], 4) ?? ''),
+        fecha:              normalizeDate(fechaVal),
+        piezasTotal:        piezasTotal,
+        bultosTotal:        bultosTotal,
+        zona:               String(getVal(['zona', 'zonas cap-int', 'zonas'], 7) ?? ''),
+        piezasEntregadas:   Number(getVal(['piezasEntregadas', 'piezas Entregadas', 'cantidad de piezas entregas', 'entregadas'], 8) ?? 0),
+        piezasNoEntregadas: Number(getVal(['piezasNoEntregadas', 'piezas No Entregadas', 'cantidad de no entregas', 'no entregas'], 9) ?? 0),
+        visitadasNovedad:   Number(getVal(['visitadasNovedad', 'visitadas Novedad', 'visitadas con novedad'], 10) ?? 0),
+        noVisitadas:        Number(getVal(['noVisitadas'], 11) ?? 0),
+        bultosEntregados:   Number(getVal(['bultosEntregados', 'bultos entregado'], 12) ?? 0),
+        bultosNoEntregados: Number(getVal(['bultosNoEntregados', 'bultos devueltos', 'bultos no entregados'], 13) ?? 0),
+        costoTotal:         parseCurrency(getVal(['costoTotal', 'costo total jornal o pieza', 'costo'], 14)),
+        observaciones:      String(getVal(['observaciones', 'obs', 'comentarios'], 15) ?? ''),
         cliente:            "N/A",
-        piezasSinNovedad:   Number(row['Piezas Entregadas']     ?? 0),
-        bultosDevueltos:    Number(row['Bultos No Entregados']  ?? 0),
+        piezasSinNovedad:   Number(getVal(['piezasEntregadas', 'piezas Entregadas'], 8) ?? 0),
+        bultosDevueltos:    Number(getVal(['bultosDevueltos', 'bultos devueltos', 'bultos no entregados'], 13) ?? 0),
         palets:             0,
         peso:               0,
         retiros:            0
@@ -89,25 +198,13 @@ function parseConsolidatedFile(workbook: XLSX.WorkBook): {
     }
   }
 
-  return { records, presupuestos };
+  return { records, presupuestos, missingColumns: Array.from(missingColumnsSet) };
 }
 
 const parseCurrency = (val: any): number => {
   if (typeof val === "number") return val;
   if (!val) return 0;
   return parseInt(String(val).replace(/[^0-9-]/g, "")) || 0;
-};
-
-export const normalizeSucursalName = (name: string): string => {
-  if (!name) return "Desconocida";
-  const upper = name.toUpperCase().replace(/ SUC$/, '').trim();
-  if (upper === 'TUC' || upper === 'TUCUMAN' || upper === 'TUCUMÁN') return 'Tucuman';
-  if (upper === 'LR' || upper === 'LA RIOJA') return 'La Rioja';
-  if (upper === 'CAT' || upper === 'CATAMARCA') return 'Catamarca';
-  if (upper === 'SLT' || upper === 'SA' || upper === 'SALTA' || upper === 'SALT') return 'Salta';
-  if (upper === 'JJY' || upper === 'JY' || upper === 'JUJUY') return 'Jujuy';
-  if (upper === 'SE' || upper === 'SGO' || upper === 'SANTIAGO DEL ESTERO' || upper === 'SANTIAGO') return 'Santiago';
-  return name;
 };
 
 const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
@@ -186,11 +283,13 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
         let totalPiezasExcel = 0;
         let totalBultosExcel = 0;
         let presupuestosMap: Record<string, number> = {};
+        let missingColumns: string[] = [];
 
         if (isConsolidatedFile(workbook)) {
           const result = parseConsolidatedFile(workbook);
           parsedData = result.records;
           presupuestosMap = result.presupuestos;
+          missingColumns = result.missingColumns;
           totalPiezasExcel = parsedData.reduce((acc, r) => acc + r.piezasTotal, 0);
           totalBultosExcel = parsedData.reduce((acc, r) => acc + r.bultosTotal, 0);
         } else {
@@ -355,7 +454,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
 
         setProgress(90);
 
-        if (parsedData.length === 0 && Object.keys(presupuestosMap).length === 0) {
+        if (parsedData.length === 0 && Object.keys(presupuestosMap).length === 0 && missingColumns.length === 0) {
           throw new Error(
             "No se encontraron datos válidos ni presupuestos en el archivo.",
           );
@@ -367,7 +466,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
               onDataLoaded(parsedData, file.name, {
                 piezas: totalPiezasExcel,
                 bultos: totalBultosExcel,
-              }, presupuestosMap);
+              }, presupuestosMap, missingColumns);
             }, 300);
           }, 500);
         }
