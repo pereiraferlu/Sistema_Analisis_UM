@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { parseNormalizedDate } from "../../utils";
 import { LogisticsData } from "../../types";
 import {
   BarChart,
@@ -216,12 +217,9 @@ export default function Piezas({
         ...obj,
       }))
       .sort((a, b) => {
-        const [dayA, monthA, yearA] = a.fecha.split("/");
-        const [dayB, monthB, yearB] = b.fecha.split("/");
-        return (
-          new Date(+yearA, +monthA - 1, +dayA).getTime() -
-          new Date(+yearB, +monthB - 1, +dayB).getTime()
-        );
+        const dateA = parseNormalizedDate(a.fecha);
+        const dateB = parseNormalizedDate(b.fecha);
+        return dateA.getTime() - dateB.getTime();
       });
   }, [data, isGeneral]);
 
@@ -272,9 +270,9 @@ export default function Piezas({
           sinNovedad: fObj.sinNovedad,
           pctSinNovedad: fObj.total > 0 ? (fObj.sinNovedad / fObj.total) * 100 : 0,
         })).sort((a, b) => {
-          const [dayA, monthA, yearA] = a.fecha.split("/");
-          const [dayB, monthB, yearB] = b.fecha.split("/");
-          return new Date(+yearA, +monthA - 1, +dayA).getTime() - new Date(+yearB, +monthB - 1, +dayB).getTime();
+          const dateA = parseNormalizedDate(a.fecha);
+          const dateB = parseNormalizedDate(b.fecha);
+          return dateA.getTime() - dateB.getTime();
         })
       }))
       .sort((a, b) => b.sinNovedad - a.sinNovedad);
@@ -316,9 +314,9 @@ export default function Piezas({
       ...obj,
       efectividad: obj.total > 0 ? (obj.entregadas / obj.total) * 100 : 0
     })).sort((a, b) => {
-      const [dayA, monthA, yearA] = a.name.split(" ")[0].split("/");
-      const [dayB, monthB, yearB] = b.name.split(" ")[0].split("/");
-      return new Date(+yearA, +monthA - 1, +dayA).getTime() - new Date(+yearB, +monthB - 1, +dayB).getTime();
+      const dateA = parseNormalizedDate(a.name.split(" ")[0]);
+      const dateB = parseNormalizedDate(b.name.split(" ")[0]);
+      return dateA.getTime() - dateB.getTime();
     });
   };
 

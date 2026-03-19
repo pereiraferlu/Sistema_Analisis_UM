@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { parseNormalizedDate } from "../../utils";
 import { LogisticsData } from "../../types";
 import Accordion from "../Accordion";
 import SortableTable from "../SortableTable";
@@ -82,16 +83,13 @@ export default function Fechas({
     });
 
     const sortedDates = Object.entries(counts).sort((a, b) => {
-      const dateA = new Date(a[0].split("/").reverse().join("-"));
-      const dateB = new Date(b[0].split("/").reverse().join("-"));
-      if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      return a[0].localeCompare(b[0]);
+      const dateA = parseNormalizedDate(a[0]);
+      const dateB = parseNormalizedDate(b[0]);
+      return dateA.getTime() - dateB.getTime();
     });
 
     return sortedDates.map(([name, stats]) => {
-      const dateObj = new Date(name.split("/").reverse().join("-"));
+      const dateObj = parseNormalizedDate(name);
       const dayOfWeek = !isNaN(dateObj.getTime())
         ? dateObj.toLocaleDateString("es-ES", { weekday: "long" })
         : "Desconocido";
@@ -164,12 +162,7 @@ export default function Fechas({
         return obj;
       })
       .sort((a, b) => {
-        const [dayA, monthA, yearA] = a.fecha.split("/");
-        const [dayB, monthB, yearB] = b.fecha.split("/");
-        return (
-          new Date(+yearA, +monthA - 1, +dayA).getTime() -
-          new Date(+yearB, +monthB - 1, +dayB).getTime()
-        );
+        return parseNormalizedDate(a.fecha).getTime() - parseNormalizedDate(b.fecha).getTime();
       });
 
     return { daysPerSucursal, evolution, sucursales: Array.from(sucursalesSet) };

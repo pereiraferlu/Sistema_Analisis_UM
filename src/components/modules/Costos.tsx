@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { parseNormalizedDate } from "../../utils";
 import { LogisticsData } from "../../types";
 import Accordion from "../Accordion";
 import SortableTable from "../SortableTable";
@@ -180,12 +181,9 @@ export default function Costos({
     });
 
     const sortedDates = Array.from(datesSet).sort((a, b) => {
-      const dateA = new Date(a.split("/").reverse().join("-"));
-      const dateB = new Date(b.split("/").reverse().join("-"));
-      if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      return a.localeCompare(b);
+      const dateA = parseNormalizedDate(a);
+      const dateB = parseNormalizedDate(b);
+      return dateA.getTime() - dateB.getTime();
     });
 
     return sortedDates.map((date) => {
@@ -224,12 +222,9 @@ export default function Costos({
     });
 
     return Array.from(subRowsMap.values()).sort((a, b) => {
-      const dateA = new Date(a.name.split(" ")[0].split("/").reverse().join("-"));
-      const dateB = new Date(b.name.split(" ")[0].split("/").reverse().join("-"));
-      if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      return a.name.localeCompare(b.name);
+      const dateA = parseNormalizedDate(a.name.split(" ")[0]);
+      const dateB = parseNormalizedDate(b.name.split(" ")[0]);
+      return dateA.getTime() - dateB.getTime();
     });
   };
 
