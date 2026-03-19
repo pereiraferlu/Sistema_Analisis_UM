@@ -154,6 +154,20 @@ export const parseNormalizedDate = (dateStr: string) => {
   return new Date(dateStr);
 };
 
+export const KNOWN_SUCURSALES = ["Tucuman", "Salta", "Jujuy", "Catamarca", "Santiago", "La Rioja"];
+
+export const normalizeSucursalName = (name: string): string => {
+  if (!name) return "Desconocida";
+  const upper = name.toUpperCase().replace(/ SUC$/, '').trim();
+  if (upper === 'TUC' || upper === 'TUCUMAN' || upper === 'TUCUMÁN') return 'Tucuman';
+  if (upper === 'LR' || upper === 'LA RIOJA') return 'La Rioja';
+  if (upper === 'CAT' || upper === 'CATAMARCA') return 'Catamarca';
+  if (upper === 'SLT' || upper === 'SA' || upper === 'SALTA' || upper === 'SALT') return 'Salta';
+  if (upper === 'JJY' || upper === 'JY' || upper === 'JUJUY') return 'Jujuy';
+  if (upper === 'SE' || upper === 'SGO' || upper === 'SANTIAGO DEL ESTERO' || upper === 'SANTIAGO') return 'Santiago';
+  return name;
+};
+
 export const normalizeHojaRuta = (val: any) => {
   return normalizeString(val).replace(/\s*-\s*/g, "-"); // Remove spaces around hyphens
 };

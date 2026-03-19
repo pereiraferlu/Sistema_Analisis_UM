@@ -31,12 +31,14 @@ export default function App() {
   const [lastRawPresupuestos, setLastRawPresupuestos] = useState<Record<string, number> | undefined>();
   const [lastConfirmedData, setLastConfirmedData] = useState<LogisticsData[]>([]);
   const [dataBackup, setDataBackup] = useState<LogisticsData[] | null>(null);
+  const [missingColumns, setMissingColumns] = useState<string[]>([]);
 
   const handleDataLoaded = (
     parsedData: LogisticsData[],
     name: string,
     parsedTotals?: { piezas: number; bultos: number },
-    presupuestosMap?: Record<string, number>
+    presupuestosMap?: Record<string, number>,
+    missingCols?: string[]
   ) => {
     setPendingData(parsedData);
     setLastRawData(parsedData); // Save raw data
@@ -45,6 +47,7 @@ export default function App() {
     setLastRawTotals(parsedTotals); // Save raw totals
     setPendingPresupuestos(presupuestosMap);
     setLastRawPresupuestos(presupuestosMap); // Save raw budgets
+    setMissingColumns(missingCols || []);
     setShowModal(true);
   };
 
@@ -170,6 +173,7 @@ export default function App() {
             pendingPresupuestos={pendingPresupuestos}
             onConfirm={handleConfirm}
             onCancel={handleCancel}
+            missingColumns={missingColumns}
           />
         )}
       </>
@@ -207,6 +211,7 @@ export default function App() {
           pendingPresupuestos={pendingPresupuestos}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
+          missingColumns={missingColumns}
         />
       )}
     </div>
