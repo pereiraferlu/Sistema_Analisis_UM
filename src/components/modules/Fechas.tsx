@@ -91,7 +91,7 @@ export default function Fechas({
     return sortedDates.map(([name, stats]) => {
       const dateObj = parseNormalizedDate(name);
       const dayOfWeek = !isNaN(dateObj.getTime())
-        ? dateObj.toLocaleDateString("es-ES", { weekday: "long" })
+        ? dateObj.toLocaleDateString("es-ES", { weekday: "long", timeZone: "UTC" })
         : "Desconocido";
 
       return {

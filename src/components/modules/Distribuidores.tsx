@@ -173,7 +173,7 @@ export default function Distribuidores({
     { key: "value", label: "Total Distribuidores", align: "center" as const },
     { key: "rutas", label: "Cantidad de Rutas", align: "center" as const },
   ] : [
-    { key: "name", label: "Distribuidor", align: "left" as const, render: (val: string) => getShortName(val, allNames) },
+    { key: "name", label: "Distribuidor", align: "left" as const },
     { key: "vehiculo", label: "Tipo de Vehículo", align: "left" as const },
     { key: "value", label: "Total Rutas", align: "center" as const },
   ];
