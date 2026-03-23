@@ -25,7 +25,7 @@ function normalizeHeader(s: any): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "");
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function parseConsolidatedFile(workbook: XLSX.WorkBook): {
@@ -111,12 +111,17 @@ function parseConsolidatedFile(workbook: XLSX.WorkBook): {
     const colMap: Record<string, number> = {};
     
     // Buscar fila de encabezado (suele estar en la fila 2, índice 1)
-    for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
+    for (let i = 0; i < Math.min(jsonData.length, 15); i++) {
       const row = jsonData[i];
       if (!Array.isArray(row)) continue;
       
       const normalizedRow = row.map(c => normalizeHeader(c));
-      if (normalizedRow.includes("hojaruta") || normalizedRow.includes("distribuidor") || normalizedRow.includes("piezastotal") || normalizedRow.includes("totalpiezas")) {
+      if (
+        normalizedRow.some(v => v.includes("hojaruta") || v.includes("hojasderuta")) || 
+        (normalizedRow.includes("fecha") && normalizedRow.some(v => v.includes("movil") || v.includes("distribuidor"))) ||
+        normalizedRow.includes("piezastotal") || 
+        normalizedRow.includes("totalpiezas")
+      ) {
         headerRowIdx = i;
         normalizedRow.forEach((val, idx) => {
           if (val) colMap[val] = idx;
@@ -155,6 +160,12 @@ function parseConsolidatedFile(workbook: XLSX.WorkBook): {
           const idx = colMap[normalizedKey];
           if (idx !== undefined) return row[idx];
         }
+        // Try partial match if exact match fails
+        for (const key of keys) {
+          const normalizedKey = normalizeHeader(key);
+          const foundKey = Object.keys(colMap).find(k => k.includes(normalizedKey) || normalizedKey.includes(k));
+          if (foundKey) return row[colMap[foundKey]];
+        }
         // If no header match, use fallback index if provided
         if (fallbackIdx !== undefined && row[fallbackIdx] !== undefined && row[fallbackIdx] !== "") {
           return row[fallbackIdx];
@@ -167,6 +178,11 @@ function parseConsolidatedFile(workbook: XLSX.WorkBook): {
 
       const piezasTotal = Number(getVal(["piezasTotal", "totalpiezas", "piezas Total", "cantidad de id piezas a gestionar", "piezas a gestionar"], 5) ?? 0);
       const bultosTotal = Number(getVal(["bultosTotal", "totalbultos", "bultos Total", "cantidad de bultos a gestionar", "bultos a gestionar"], 6) ?? 0);
+      const palets = Number(getVal(["palets", "pallets"], 19) ?? 0);
+      const pesoRaw = getVal(["peso", "kg transportado", "kg"], 20);
+      const peso = typeof pesoRaw === 'number' 
+        ? Number(pesoRaw.toFixed(2)) 
+        : Number(parseFloat(String(pesoRaw || 0).replace(',', '.')).toFixed(2)) || 0;
       
       const distribuidor = String(getVal(["distribuidor", "nombre completo del movil", "movil"], 2) ?? '');
       if (!distribuidor) continue;
@@ -191,8 +207,8 @@ function parseConsolidatedFile(workbook: XLSX.WorkBook): {
         cliente:            "N/A",
         piezasSinNovedad:   Number(getVal(['piezasEntregadas', 'piezas Entregadas'], 8) ?? 0),
         bultosDevueltos:    Number(getVal(['bultosDevueltos', 'bultos devueltos', 'bultos no entregados'], 13) ?? 0),
-        palets:             0,
-        peso:               0,
+        palets:             palets,
+        peso:               peso,
         retiros:            0
       });
     }
@@ -210,6 +226,7 @@ const parseCurrency = (val: any): number => {
 const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
   const v = vehiculoRaw.toLowerCase().trim();
   
+  if (v.includes("cartero") || v.includes("mensajero")) return "Cartero";
   if (v.includes("moto")) return "Moto";
   if (v.includes("auto")) return "Auto";
   
@@ -222,6 +239,14 @@ const parseVehiculo = (vehiculoRaw: string, colQ: string): string => {
     v.includes("utilitario grande")
   ) {
     return "Utilitario Grande";
+  }
+
+  if (
+    v.includes("utilitario mediano") ||
+    v.includes("furgon mediano") ||
+    v.includes("furgón mediano")
+  ) {
+    return "Utilitario Mediano";
   }
 
   if (
@@ -322,14 +347,19 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
             let headerRowIdx = -1;
             const colMap: Record<string, number> = {};
             
-            for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
+            for (let i = 0; i < Math.min(jsonData.length, 15); i++) {
               const row = jsonData[i];
               if (!Array.isArray(row)) continue;
               
-              const rowStr = row.map(c => String(c || "").toLowerCase().trim().replace(/\s+/g, ""));
-              if (rowStr.includes("hojaruta") || rowStr.includes("distribuidor") || rowStr.includes("piezastotal")) {
+              const normalizedRow = row.map(c => normalizeHeader(c));
+              if (
+                normalizedRow.some(v => v.includes("hojaruta") || v.includes("hojasderuta")) || 
+                (normalizedRow.includes("fecha") && normalizedRow.some(v => v.includes("movil") || v.includes("distribuidor"))) ||
+                normalizedRow.includes("piezastotal") || 
+                normalizedRow.includes("totalpiezas")
+              ) {
                 headerRowIdx = i;
-                rowStr.forEach((val, idx) => {
+                normalizedRow.forEach((val, idx) => {
                   if (val) colMap[val] = idx;
                 });
                 break;
@@ -349,8 +379,15 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
                 if (headerRowIdx !== -1) {
                   const getVal = (keys: string[]) => {
                     for (const key of keys) {
-                      const idx = colMap[key.toLowerCase().replace(/\s+/g, "")];
+                      const normalizedKey = normalizeHeader(key);
+                      const idx = colMap[normalizedKey];
                       if (idx !== undefined) return row[idx];
+                    }
+                    // Try partial match if exact match fails
+                    for (const key of keys) {
+                      const normalizedKey = normalizeHeader(key);
+                      const foundKey = Object.keys(colMap).find(k => k.includes(normalizedKey) || normalizedKey.includes(k));
+                      if (foundKey) return row[colMap[foundKey]];
                     }
                     return undefined;
                   };

@@ -27,8 +27,10 @@ const KNOWN_BRANCHES = [
 const KNOWN_VEHICLES = [
   "Auto",
   "Utilitario Chico",
+  "Utilitario Mediano",
   "Utilitario Grande",
   "Moto",
+  "Cartero",
   "Local Comercial",
   "Camión"
 ];
@@ -54,7 +56,8 @@ export default function ValidationModal({
   const unknownVehicles = useMemo(() => Array.from(new Set(data.map(d => d.vehiculo))).filter(v => !KNOWN_VEHICLES.includes(v)), [data]);
   const unknownZones = useMemo(() => Array.from(new Set(data.map(d => d.zona))).filter(z => normalizeZone(z) === null && z), [data]);
   
-  const needsMapping = unknownVehicles.length > 0 || unknownZones.length > 0;
+  const needsVehicleMapping = unknownVehicles.length > 0;
+  const needsZoneMapping = unknownZones.length > 0;
   const isPending = data.some((d) => d.sucursal === "PENDING_SUCURSAL");
   
   const hasDifferentPresupuestos = useMemo(() => {
@@ -67,9 +70,9 @@ export default function ValidationModal({
       
       if (!isKnown) return false;
       
-      const existingAmount = existingPresupuestos?.[branchName];
-      // Only consider it "different" if it's new or the amount changed
-      return existingAmount === undefined || existingAmount !== amount;
+      const existingAmount = existingPresupuestos?.[branchName] || 0;
+      // Only consider it "different" if the amount changed (treating undefined as 0)
+      return existingAmount !== amount;
     });
   }, [pendingPresupuestos, existingPresupuestos, selectedSucursal]);
 
@@ -81,12 +84,12 @@ export default function ValidationModal({
         const isKnown = KNOWN_BRANCHES.some(kb => normalizeString(kb) === normalizedBranch);
         if (!isKnown) return false;
         
-        const existingAmount = existingPresupuestos?.[branchName];
-        return existingAmount === undefined || existingAmount !== amount;
+        const existingAmount = existingPresupuestos?.[branchName] || 0;
+        return existingAmount !== amount;
       }).length;
   }, [pendingPresupuestos, selectedSucursal, existingPresupuestos]);
 
-  const [step, setStep] = useState<'missing_columns' | 'quantity_validation' | 'novedad_validation' | 'mapping' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
+  const [step, setStep] = useState<'missing_columns' | 'quantity_validation' | 'novedad_validation' | 'vehicle_mapping' | 'zone_mapping' | 'date_validation' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
     missingColumns.length > 0 ? 'missing_columns' : 'quantity_validation'
   );
   const [stepHistory, setStepHistory] = useState<string[]>([]);
@@ -97,6 +100,52 @@ export default function ValidationModal({
   const [excludedIndices, setExcludedIndices] = useState<Set<number>>(new Set());
   const [allDeliveredIndices, setAllDeliveredIndices] = useState<Set<number>>(new Set());
   const [allNoveltyIndices, setAllNoveltyIndices] = useState<Set<number>>(new Set());
+  const [isAllDeliveredMassive, setIsAllDeliveredMassive] = useState(false);
+  const [isAllNoveltyMassive, setIsAllNoveltyMassive] = useState(false);
+
+  const predominantMonth = useMemo(() => {
+    if (data.length === 0) return null;
+    const monthCounts: Record<string, number> = {};
+    data.forEach(d => {
+      const parts = d.fecha.split("-");
+      if (parts.length === 3) {
+        const monthYear = `${parts[1]}-${parts[2]}`;
+        monthCounts[monthYear] = (monthCounts[monthYear] || 0) + d.piezasTotal;
+      }
+    });
+    
+    let maxCount = 0;
+    let bestMonth = null;
+    for (const [monthYear, count] of Object.entries(monthCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestMonth = monthYear;
+      }
+    }
+    return bestMonth;
+  }, [data]);
+
+  const initialDateDiscrepancyIndices = useMemo(() => {
+    if (!predominantMonth) return [];
+    const currentMonth = new Date().getUTCMonth() + 1;
+    const currentYear = String(new Date().getUTCFullYear()).slice(-2);
+    const currentMonthYear = `${String(currentMonth).padStart(2, "0")}-${currentYear}`;
+
+    return data.map((d, index) => {
+      const parts = d.fecha.split("-");
+      if (parts.length === 3) {
+        const monthYear = `${parts[1]}-${parts[2]}`;
+        if (monthYear !== predominantMonth && monthYear !== currentMonthYear) {
+          return index;
+        }
+      }
+      return -1;
+    }).filter(idx => idx !== -1);
+  }, [data, predominantMonth]);
+
+  const dateDiscrepancies = useMemo(() => {
+    return initialDateDiscrepancyIndices.filter(idx => !excludedIndices.has(idx));
+  }, [initialDateDiscrepancyIndices, excludedIndices]);
 
   const mappedData = useMemo<LogisticsData[]>(() => {
     return data.map((d, index) => {
@@ -110,7 +159,7 @@ export default function ValidationModal({
         ...correction,
         sucursal,
         vehiculo: vehicleMapping[d.vehiculo] || d.vehiculo,
-        zona: normalizeZone(d.zona) || zoneMapping[d.zona] || d.zona,
+        zona: normalizeZone(d.zona) || zoneMapping[d.zona] || "CAPITAL",
       } as LogisticsData;
 
       if (isAllDelivered && finalItem.bultosTotal >= finalItem.piezasTotal) {
@@ -132,6 +181,27 @@ export default function ValidationModal({
       return finalItem;
     });
   }, [data, vehicleMapping, zoneMapping, corrections, allDeliveredIndices, allNoveltyIndices, selectedSucursal]);
+
+  const pendingDateDiscrepancies = useMemo(() => {
+    if (!predominantMonth) return [];
+    const currentMonth = new Date().getUTCMonth() + 1;
+    const currentYear = String(new Date().getUTCFullYear()).slice(-2);
+    const currentMonthYear = `${String(currentMonth).padStart(2, "0")}-${currentYear}`;
+
+    return mappedData.map((d, index) => {
+      if (!initialDateDiscrepancyIndices.includes(index)) return -1;
+      if (excludedIndices.has(index)) return -1;
+      
+      const parts = d.fecha.split("-");
+      if (parts.length === 3) {
+        const monthYear = `${parts[1]}-${parts[2]}`;
+        if (monthYear !== predominantMonth && monthYear !== currentMonthYear) {
+          return index;
+        }
+      }
+      return -1;
+    }).filter(idx => idx !== -1);
+  }, [mappedData, excludedIndices, initialDateDiscrepancyIndices, predominantMonth]);
 
   const initialDiscrepancyIndices = useMemo(() => {
     return data.map((d, index) => {
@@ -246,8 +316,12 @@ export default function ValidationModal({
       setStep('quantity_validation');
     } else if (pendingNovedadDiscrepancies.length > 0) {
       setStep('novedad_validation');
-    } else if (needsMapping) {
-      setStep('mapping');
+    } else if (needsVehicleMapping) {
+      setStep('vehicle_mapping');
+    } else if (needsZoneMapping) {
+      setStep('zone_mapping');
+    } else if (pendingDateDiscrepancies.length > 0) {
+      setStep('date_validation');
     } else if (hasDifferentPresupuestos) {
       setStep('budget_validation');
     } else if (conflicts.length > 0) {
@@ -273,14 +347,14 @@ export default function ValidationModal({
       if (res !== 'replace') return false;
       
       const branchName = suc === "PENDING_SUCURSAL" ? selectedSucursal : suc;
-      const amount = pendingPresupuestos?.[suc];
-      const existing = existingPresupuestos?.[branchName];
+      const amount = pendingPresupuestos?.[suc] || 0;
+      const existing = existingPresupuestos?.[branchName] || 0;
       
       const normalizedBranch = normalizeString(branchName);
       const isKnown = KNOWN_BRANCHES.some(kb => normalizeString(kb) === normalizedBranch);
       if (!isKnown) return false;
 
-      return existing === undefined || existing !== amount;
+      return existing !== amount;
     });
 
     if (anyChanges) {
@@ -322,7 +396,7 @@ export default function ValidationModal({
 
   // Duplicate and Conflict detection
   const { duplicates, conflicts, newRoutes } = useMemo(() => {
-    if (step === 'mapping') return { duplicates: [], conflicts: [], newRoutes: [] };
+    if (step === 'vehicle_mapping' || step === 'zone_mapping') return { duplicates: [], conflicts: [], newRoutes: [] };
 
     const dups: LogisticsData[] = [];
     const confs: { id: string; existing: LogisticsData; incoming: LogisticsData }[] = [];
@@ -412,7 +486,8 @@ export default function ValidationModal({
       const nextStepAfterExclusion = (currentStep: string): any => {
         if (currentStep === 'quantity_validation') {
           if (pendingNovedadDiscrepancies.filter(idx => !newExcluded.has(idx)).length > 0) return 'novedad_validation';
-          if (needsMapping) return 'mapping';
+          if (needsVehicleMapping) return 'vehicle_mapping';
+          if (needsZoneMapping) return 'zone_mapping';
           if (hasDifferentPresupuestos) return 'budget_validation';
           if (conflicts.length > 0) return 'conflicts';
           return 'validation';
@@ -436,7 +511,8 @@ export default function ValidationModal({
 
       const nextStepAfterExclusion = (currentStep: string): any => {
         if (currentStep === 'novedad_validation') {
-          if (needsMapping) return 'mapping';
+          if (needsVehicleMapping) return 'vehicle_mapping';
+          if (needsZoneMapping) return 'zone_mapping';
           if (hasDifferentPresupuestos) return 'budget_validation';
           if (conflicts.length > 0) return 'conflicts';
           return 'validation';
@@ -452,11 +528,24 @@ export default function ValidationModal({
       }
     }
 
+    if (step === 'zone_mapping') {
+      const newMapping = { ...zoneMapping };
+      let changed = false;
+      unknownZones.forEach(z => {
+        if (!newMapping[z]) {
+          newMapping[z] = 'CAPITAL';
+          changed = true;
+        }
+      });
+      if (changed) setZoneMapping(newMapping);
+    }
+
     const nextStep = (currentStep: string): any => {
       if (currentStep === 'missing_columns') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
-        if (needsMapping) return 'mapping';
+        if (needsVehicleMapping) return 'vehicle_mapping';
+        if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
@@ -464,7 +553,8 @@ export default function ValidationModal({
       if (currentStep === 'branch_selection') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
-        if (needsMapping) return 'mapping';
+        if (needsVehicleMapping) return 'vehicle_mapping';
+        if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
@@ -472,19 +562,34 @@ export default function ValidationModal({
       if (currentStep === 'quantity_validation') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
-        if (needsMapping) return 'mapping';
+        if (needsVehicleMapping) return 'vehicle_mapping';
+        if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
       }
       if (currentStep === 'novedad_validation') {
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
-        if (needsMapping) return 'mapping';
+        if (needsVehicleMapping) return 'vehicle_mapping';
+        if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
       }
-      if (currentStep === 'mapping') {
+      if (currentStep === 'vehicle_mapping') {
+        if (needsZoneMapping) return 'zone_mapping';
+        if (pendingDateDiscrepancies.length > 0) return 'date_validation';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'zone_mapping') {
+        if (pendingDateDiscrepancies.length > 0) return 'date_validation';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'date_validation') {
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
@@ -646,6 +751,25 @@ export default function ValidationModal({
                 <p className="text-sm text-danger-800 mb-4">
                   Se detectaron "{quantityDiscrepancies.length}" discrepancias en las cantidades totales de algunas rutas. Por favor, verifique y corrija los datos:
                 </p>
+
+                <label className="flex items-center space-x-2 cursor-pointer group mb-4 p-3 bg-white rounded-xl border border-danger-100 shadow-sm w-fit">
+                  <input
+                    type="checkbox"
+                    checked={isAllDeliveredMassive}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsAllDeliveredMassive(checked);
+                      const newAllDelivered = new Set(allDeliveredIndices);
+                      quantityDiscrepancies.forEach(({ index }) => {
+                        if (checked) newAllDelivered.add(index);
+                        else newAllDelivered.delete(index);
+                      });
+                      setAllDeliveredIndices(newAllDelivered);
+                    }}
+                    className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                  />
+                  <span className="text-[10px] font-bold text-secondary-500 uppercase tracking-wider">Poner todo a entregado</span>
+                </label>
                 
                 <div className="space-y-4">
                   {quantityDiscrepancies.map(({ data: d, index }) => {
@@ -697,13 +821,17 @@ export default function ValidationModal({
                                 checked={allDeliveredIndices.has(index)}
                                 onChange={() => {
                                   const newAllDelivered = new Set(allDeliveredIndices);
-                                  if (allDeliveredIndices.has(index)) newAllDelivered.delete(index);
-                                  else newAllDelivered.add(index);
+                                  if (allDeliveredIndices.has(index)) {
+                                    newAllDelivered.delete(index);
+                                    setIsAllDeliveredMassive(false);
+                                  } else {
+                                    newAllDelivered.add(index);
+                                  }
                                   setAllDeliveredIndices(newAllDelivered);
                                 }}
                                 className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
                               />
-                              <span className="text-[10px] font-bold text-primary-600 uppercase group-hover:text-primary-700">Poner todo a entregado</span>
+                              <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">Poner a entregado</span>
                             </label>
                           </div>
                         </div>
@@ -837,6 +965,25 @@ export default function ValidationModal({
                   Se detectaron "{novedadDiscrepancies.length}" rutas donde la suma de (Visitadas con Novedad + No Visitadas) no coincide con el Total de Piezas. Por favor, corrija los datos:
                 </p>
 
+                <label className="flex items-center space-x-2 cursor-pointer group mb-4 p-3 bg-white rounded-xl border border-amber-100 shadow-sm w-fit">
+                  <input
+                    type="checkbox"
+                    checked={isAllNoveltyMassive}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsAllNoveltyMassive(checked);
+                      const newAllNovelty = new Set(allNoveltyIndices);
+                      novedadDiscrepancies.forEach(({ index }) => {
+                        if (checked) newAllNovelty.add(index);
+                        else newAllNovelty.delete(index);
+                      });
+                      setAllNoveltyIndices(newAllNovelty);
+                    }}
+                    className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                  />
+                  <span className="text-[10px] font-bold text-secondary-500 uppercase tracking-wider">Marcar todas las rutas con novedad</span>
+                </label>
+
                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                   {novedadDiscrepancies.map(({ data: item, index }) => {
                     const correction = corrections[index] || {};
@@ -895,13 +1042,17 @@ export default function ValidationModal({
                                 checked={isAllNovelty}
                                 onChange={() => {
                                   const newAllNovelty = new Set(allNoveltyIndices);
-                                  if (isAllNovelty) newAllNovelty.delete(index);
-                                  else newAllNovelty.add(index);
+                                  if (isAllNovelty) {
+                                    newAllNovelty.delete(index);
+                                    setIsAllNoveltyMassive(false);
+                                  } else {
+                                    newAllNovelty.add(index);
+                                  }
                                   setAllNoveltyIndices(newAllNovelty);
                                 }}
                                 className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
                               />
-                              <span className="text-[10px] font-bold text-primary-600 uppercase group-hover:text-primary-700">Marcar piezas con novedad</span>
+                              <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">Marcar piezas con novedad</span>
                             </label>
                           </div>
                         </div>
@@ -946,98 +1097,184 @@ export default function ValidationModal({
                 </div>
               </div>
             </div>
-          ) : step === 'mapping' ? (
+          ) : step === 'vehicle_mapping' ? (
             <div className="space-y-6">
-              {unknownVehicles.length > 0 && (
-                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                  <div className="flex items-center space-x-2 mb-4 text-amber-700">
-                    <AlertTriangle className="w-5 h-5" />
-                    <h3 className="font-bold">Vehículos no reconocidos</h3>
-                  </div>
-                  <p className="text-sm text-amber-800 mb-4">
-                    Se detectaron "{totalUnknownVehiclesRoutes}" rutas con vehículos que no coinciden con las categorías del sistema. Por favor, asígnelos correctamente:
-                  </p>
-                  <div className="grid grid-cols-1 gap-4">
-                    {unknownVehiclesWithDetails.map(({ vehiculo, observations }) => (
-                      <div key={vehiculo} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                            Vehículo: <span className="text-amber-600">"{vehiculo}"</span>
-                          </label>
-                          <select
-                            value={vehicleMapping[vehiculo] || KNOWN_VEHICLES[0]}
-                            onChange={(e) => setVehicleMapping(prev => ({ ...prev, [vehiculo]: e.target.value }))}
-                            className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
-                          >
-                            {KNOWN_VEHICLES.map(kv => (
-                              <option key={kv} value={kv}>{kv}</option>
-                            ))}
-                          </select>
-                        </div>
-                        
-                        <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
-                          <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
-                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                            {observations.map((obs, idx) => (
-                              <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                                <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
-                              </div>
-                            ))}
-                          </div>
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center space-x-2 mb-4 text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold uppercase tracking-wider">Vehículos no reconocidos</h3>
+                </div>
+                <p className="text-sm text-amber-800 mb-4">
+                  Se detectaron "{totalUnknownVehiclesRoutes}" rutas con vehículos que no coinciden con las categorías del sistema. Por favor, asígnelos correctamente:
+                </p>
+                <div className="grid grid-cols-1 gap-4">
+                  {unknownVehiclesWithDetails.map(({ vehiculo, observations }) => (
+                    <div key={vehiculo} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                          Vehículo: <span className="text-amber-600">"{vehiculo}"</span>
+                        </label>
+                        <select
+                          value={vehicleMapping[vehiculo] || KNOWN_VEHICLES[0]}
+                          onChange={(e) => setVehicleMapping(prev => ({ ...prev, [vehiculo]: e.target.value }))}
+                          className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
+                        >
+                          {KNOWN_VEHICLES.map(kv => (
+                            <option key={kv} value={kv}>{kv}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
+                        <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
+                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                          {observations.map((obs, idx) => (
+                            <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                              <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              )}
-
-              {unknownZones.length > 0 && (
-                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                  <div className="flex items-center space-x-2 mb-4 text-amber-700">
-                    <AlertTriangle className="w-5 h-5" />
-                    <h3 className="font-bold">Zonas no reconocidas</h3>
-                  </div>
-                  <p className="text-sm text-amber-800 mb-4">
-                    Se detectaron "{totalUnknownZonesRoutes}" rutas con zonas que no coinciden con "Capital" o "Interior". Por favor, verifique si están bien asignadas:
-                  </p>
-                  <div className="grid grid-cols-1 gap-4">
-                    {unknownZonesWithDetails.map(({ zona, observations }) => (
-                      <div key={zona} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                            Zona: <span className="text-amber-600">"{zona === "SIN_ZONA" ? "Sin Zona (Celda vacía)" : zona}"</span>
-                          </label>
-                          <select
-                            value={zoneMapping[zona] || "CAPITAL"}
-                            onChange={(e) => setZoneMapping(prev => ({ ...prev, [zona]: e.target.value }))}
-                            className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
-                          >
-                            <option value="CAPITAL">CAPITAL</option>
-                            <option value="INTERIOR">INTERIOR</option>
-                          </select>
-                        </div>
-
-                        <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
-                          <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
-                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                            {observations.map((obs, idx) => (
-                              <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                                <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              </div>
               
               <div className="text-center py-4">
                 <p className="text-sm font-medium text-secondary-600">
-                  Una vez confirmadas las zonas y vehículos, el sistema procederá a validar duplicados y conflictos.
+                  Una vez confirmados los vehículos, el sistema procederá a validar las zonas.
+                </p>
+              </div>
+            </div>
+          ) : step === 'zone_mapping' ? (
+            <div className="space-y-6">
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center space-x-2 mb-4 text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold uppercase tracking-wider">Zonas no reconocidas</h3>
+                </div>
+                <p className="text-sm text-amber-800 mb-4">
+                  Se detectaron "{totalUnknownZonesRoutes}" rutas con zonas que no coinciden con "Capital" o "Interior". Por favor, verifique si están bien asignadas:
+                </p>
+                <div className="grid grid-cols-1 gap-4">
+                  {unknownZonesWithDetails.map(({ zona, observations }) => (
+                    <div key={zona} className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <label className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                          Zona: <span className="text-amber-600">"{zona === "SIN_ZONA" ? "Sin Zona (Celda vacía)" : zona}"</span>
+                        </label>
+                        <select
+                          value={zoneMapping[zona] || "CAPITAL"}
+                          onChange={(e) => setZoneMapping(prev => ({ ...prev, [zona]: e.target.value }))}
+                          className="text-sm border-amber-300 rounded-lg bg-white focus:ring-amber-500 focus:border-amber-500 min-w-[200px]"
+                        >
+                          <option value="CAPITAL">CAPITAL</option>
+                          <option value="INTERIOR">INTERIOR</option>
+                        </select>
+                      </div>
+
+                      <div className="bg-amber-50/50 rounded-md p-2 border border-amber-100">
+                        <p className="text-[10px] font-bold text-amber-700 uppercase mb-1">Observaciones encontradas:</p>
+                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                          {observations.map((obs, idx) => (
+                            <div key={idx} className="text-[10px] text-amber-800 flex items-center space-x-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                              <span>{obs.sucursal} - {obs.fecha} - Ruta: <span className="font-bold">{obs.hojaRuta}</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="text-center py-4">
+                <p className="text-sm font-medium text-secondary-600">
+                  Una vez confirmadas las zonas, el sistema procederá a validar duplicados y conflictos.
+                </p>
+              </div>
+            </div>
+          ) : step === 'date_validation' ? (
+            <div className="space-y-6">
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center space-x-2 mb-4 text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold uppercase tracking-wider">Validación de Fechas</h3>
+                </div>
+                <p className="text-sm text-amber-800 mb-4">
+                  Se detectaron "{initialDateDiscrepancyIndices.length}" rutas con fechas que no corresponden al mes predominante ({predominantMonth}) ni al mes en curso. Por favor, verifique y corrija si es necesario:
+                </p>
+                
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {initialDateDiscrepancyIndices.map((index) => {
+                    const d = mappedData[index];
+                    const isExcluded = excludedIndices.has(index);
+                    
+                    const parts = d.fecha.split("-");
+                    const monthYear = parts.length === 3 ? `${parts[1]}-${parts[2]}` : "";
+                    const currentMonth = new Date().getUTCMonth() + 1;
+                    const currentYear = String(new Date().getUTCFullYear()).slice(-2);
+                    const currentMonthYear = `${String(currentMonth).padStart(2, "0")}-${currentYear}`;
+                    const hasError = monthYear !== predominantMonth && monthYear !== currentMonthYear;
+                    
+                    return (
+                      <div key={index} className={`p-4 bg-white rounded-xl border shadow-sm space-y-4 transition-opacity ${isExcluded ? 'opacity-50 grayscale border-secondary-200' : 'border-amber-100'}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-secondary-50">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {d.sucursal}
+                            </span>
+                            <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              HDR: {d.hojaRuta}
+                            </span>
+                          </div>
+                          
+                          <label className="flex items-center space-x-2 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={isExcluded}
+                              onChange={() => {
+                                const newExcluded = new Set(excludedIndices);
+                                if (isExcluded) newExcluded.delete(index);
+                                else newExcluded.add(index);
+                                setExcludedIndices(newExcluded);
+                              }}
+                              className="w-4 h-4 text-primary-600 rounded border-secondary-300 focus:ring-primary-500"
+                            />
+                            <span className="text-[10px] font-bold text-secondary-500 uppercase group-hover:text-secondary-700">No incluir ruta</span>
+                          </label>
+                        </div>
+
+                        {!isExcluded && (
+                          <div className="flex items-center space-x-4">
+                            <div className="flex-1 space-y-1.5">
+                              <label className="text-[10px] font-bold text-secondary-500 uppercase">Fecha de la Ruta</label>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="text"
+                                  value={d.fecha}
+                                  onChange={(e) => setCorrections(prev => ({ ...prev, [index]: { ...prev[index], fecha: e.target.value } }))}
+                                  placeholder="DD-MM-AA"
+                                  className={`flex-1 px-3 py-2 text-sm rounded-lg border focus:ring-2 focus:ring-primary-500 transition-all font-mono ${hasError ? 'border-amber-300 bg-amber-50' : 'border-success-200 bg-success-50'}`}
+                                />
+                                <div className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${hasError ? 'text-amber-600 bg-amber-50 border-amber-100' : 'text-success-600 bg-success-50 border-success-100'}`}>
+                                  Mes: {d.fecha.split("-")[1] || "?"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <div className="text-center py-4">
+                <p className="text-sm font-medium text-secondary-600">
+                  Puede corregir la fecha manualmente o marcar la ruta para no ser incluida.
                 </p>
               </div>
             </div>
@@ -1091,8 +1328,8 @@ export default function ValidationModal({
                       const isKnown = KNOWN_BRANCHES.some(kb => normalizeString(kb) === normalizedBranch);
                       if (!isKnown) return false;
                       
-                      const existingAmount = existingPresupuestos?.[branchName];
-                      return existingAmount === undefined || existingAmount !== amount;
+                      const existingAmount = existingPresupuestos?.[branchName] || 0;
+                      return existingAmount !== amount;
                     })
                     .map(([suc, amount]) => {
                       const branchName = suc === "PENDING_SUCURSAL" ? selectedSucursal : suc;
@@ -1125,9 +1362,11 @@ export default function ValidationModal({
                                   type="radio"
                                   checked={budgetResolutions[suc] === 'replace'}
                                   onChange={() => setBudgetResolutions(prev => ({ ...prev, [suc]: 'replace' }))}
-                                  className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500"
+                                  className="w-3.5 h-3.5 text-secondary-600 focus:ring-secondary-500"
                                 />
-                                <span className="text-[10px] font-bold text-amber-600 group-hover:text-amber-700 uppercase tracking-wider">Reemplazar</span>
+                                <span className="text-[10px] font-bold text-secondary-500 group-hover:text-secondary-700 uppercase tracking-wider">
+                                  {existingAmount === 0 || existingAmount === undefined ? "Agregar" : "Reemplazar"}
+                                </span>
                               </label>
                               <label className="flex items-center space-x-1.5 cursor-pointer group">
                                 <input

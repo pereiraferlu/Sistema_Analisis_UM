@@ -65,11 +65,9 @@ export default function Sidebar({
 
             <div className="flex-1 p-6 space-y-4">
               <button
-                onClick={() => {
-                  onExportReport();
-                }}
+                onClick={onExportReport}
                 disabled={isExporting}
-                className="w-full flex items-center p-3 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 transition-all group cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center p-3 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 transition-all duration-200 group cursor-pointer disabled:opacity-50"
               >
                 <div className="p-2 bg-blue-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <Download className="w-4 h-4 text-white" />
@@ -80,39 +78,31 @@ export default function Sidebar({
               </button>
 
               <button
-                onClick={() => {
-                  onAddRoutes();
-                  onClose();
-                }}
-                className="w-full flex items-center p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-all group cursor-pointer"
+                onClick={() => { onAddRoutes(); onClose(); }}
+                className="w-full flex items-center p-3 rounded-xl bg-violet-50 text-violet-700 hover:bg-violet-100 transition-all duration-200 group cursor-pointer"
               >
-                <div className="p-2 bg-emerald-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                <div className="p-2 bg-violet-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <PlusCircle className="w-4 h-4 text-white" />
                 </div>
                 <span className="text-sm font-medium text-left">Agregar Rutas</span>
               </button>
 
               <button
-                onClick={() => {
-                  onRevalidate();
-                  onClose();
-                }}
-                className="w-full flex items-center p-3 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all group cursor-pointer"
+                onClick={() => { onRevalidate(); onClose(); }}
+                className="w-full flex items-center p-3 rounded-xl bg-orange-50 text-orange-700 hover:bg-orange-100 transition-all duration-200 group cursor-pointer"
               >
-                <div className="p-2 bg-indigo-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                <div className="p-2 bg-orange-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <FileSpreadsheet className="w-4 h-4 text-white" />
                 </div>
                 <span className="text-sm font-medium text-left">Validación de Datos</span>
               </button>
 
               <button
-                onClick={() => {
-                  onSaveAndExport();
-                }}
+                onClick={onSaveAndExport}
                 disabled={isSaving}
-                className="w-full flex items-center p-3 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all group cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-all duration-200 group cursor-pointer disabled:opacity-50"
               >
-                <div className="p-2 bg-amber-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                <div className="p-2 bg-emerald-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <Save className="w-4 h-4 text-white" />
                 </div>
                 <span className="text-sm font-medium text-left">
@@ -121,11 +111,8 @@ export default function Sidebar({
               </button>
 
               <button
-                onClick={() => {
-                  onReset();
-                  onClose();
-                }}
-                className="w-full flex items-center p-3 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 transition-all group cursor-pointer"
+                onClick={() => { onReset(); onClose(); }}
+                className="w-full flex items-center p-3 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 transition-all duration-200 group cursor-pointer"
               >
                 <div className="p-2 bg-red-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <RefreshCw className="w-4 h-4 text-white" />
