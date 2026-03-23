@@ -177,24 +177,33 @@ export const normalizeZone = (zone: string) => {
   const normalized = normalizeString(zone);
   
   // Check for Capital and its abbreviations with more precision
-  const isCapital = normalized === "CAPITAL" || 
-                    normalized === "CAP" || 
-                    normalized === "CAPT" || 
-                    normalized === "CAPTAL" ||
-                    normalized.startsWith("CAPITAL ") ||
-                    normalized.includes(" CAPITAL ");
-                    
-  if (isCapital) return "CAPITAL";
+  if (
+    normalized.startsWith("CAPITAL") || 
+    normalized.startsWith("CAP ") || 
+    normalized.startsWith("CAP/") ||
+    normalized === "CAP" ||
+    normalized === "CAPT" ||
+    normalized === "CAPTAL" ||
+    normalized === "BANDA" ||
+    normalized.includes(" CAPITAL") ||
+    normalized.includes("/CAPITAL")
+  ) {
+    return "CAPITAL";
+  }
   
   // Check for Interior and its abbreviations with more precision
-  const isInterior = normalized === "INTERIOR" || 
-                     normalized === "INT" || 
-                     normalized === "INTR" || 
-                     normalized === "INTER" ||
-                     normalized.startsWith("INTERIOR ") ||
-                     normalized.includes(" INTERIOR ");
-
-  if (isInterior) return "INTERIOR";
+  if (
+    normalized.startsWith("INTERIOR") || 
+    normalized.startsWith("INT ") || 
+    normalized.startsWith("INT/") ||
+    normalized === "INT" ||
+    normalized === "INTR" || 
+    normalized === "INTER" ||
+    normalized.includes(" INTERIOR") ||
+    normalized.includes("/INTERIOR")
+  ) {
+    return "INTERIOR";
+  }
   
   return null; // Return null if not recognized as one of the two
 };
