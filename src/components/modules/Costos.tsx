@@ -74,6 +74,7 @@ export default function Costos({
       }
     > = {};
     let totalCosto = 0;
+    let totalPresupuesto = 0;
     let totalEntregadas = 0;
     let totalNoEntregadas = 0;
     let totalRutas = new Set<string>();
@@ -106,6 +107,7 @@ export default function Costos({
     const entityData = Object.entries(counts)
       .map(([name, stats]) => {
         const pres = presupuestos[name] || 0;
+        totalPresupuesto += pres;
         return {
           name,
           vehiculo: stats.vehiculo,
@@ -123,7 +125,7 @@ export default function Costos({
               ? Math.round(stats.costoTotal / stats.rutas.size)
               : 0,
           presupuesto: pres,
-          margen: pres - stats.costoTotal,
+          porcentajeGastado: pres > 0 ? (stats.costoTotal / pres) * 100 : 0,
         };
       })
       .sort((a, b) => b.costoTotal - a.costoTotal);
@@ -131,6 +133,7 @@ export default function Costos({
     return {
       entityData,
       totalCosto,
+      totalPresupuesto,
       promedioEntregada:
         totalEntregadas > 0 ? Math.round(totalCosto / totalEntregadas) : 0,
       promedioNoEntregada:
@@ -236,13 +239,6 @@ export default function Costos({
       renderExpanded: (val: any) => <span>{val}</span>,
     },
     {
-      key: "costoTotal",
-      label: "Costo Total",
-      align: "center" as const,
-      render: (val: number) => `$${val.toLocaleString()}`,
-      renderExpanded: (val: any) => val !== null ? `$${val.toLocaleString()}` : "",
-    },
-    {
       key: "presupuesto",
       label: "Presupuesto",
       align: "center" as const,
@@ -284,14 +280,28 @@ export default function Costos({
       renderExpanded: () => "",
     },
     {
-      key: "margen",
-      label: "Margen",
+      key: "costoTotal",
+      label: "Costo Total",
+      align: "center" as const,
+      render: (val: number) => `$${val.toLocaleString()}`,
+      renderExpanded: (val: any) => val !== null ? `$${val.toLocaleString()}` : "",
+    },
+    {
+      key: "porcentajeGastado",
+      label: "% Gastado",
       align: "center" as const,
       render: (val: number, row: any) => {
         const numVal = val || 0;
+        if (row.name === undefined) {
+          return (
+            <span className={numVal > 100 ? "text-danger-600 font-bold" : "text-primary-600 font-bold"}>
+              {numVal.toFixed(0)}%
+            </span>
+          );
+        }
         return (
-          <span className={numVal < 0 ? "text-danger-600 font-bold" : "text-primary-600 font-bold"}>
-            ${numVal.toLocaleString()}
+          <span className={numVal > 100 ? "text-danger-600 font-bold" : "text-primary-600 font-bold"}>
+            {numVal.toFixed(0)}%
           </span>
         );
       },
@@ -425,7 +435,8 @@ export default function Costos({
             getSubRows={showPresupuesto ? undefined : getSubRows}
             customTotals={{
               costoPromedioEntregada: costosData.promedioEntregada,
-              promedioCostoSucursal: costosData.promedioCostoSucursal
+              promedioCostoSucursal: costosData.promedioCostoSucursal,
+              porcentajeGastado: costosData.totalPresupuesto > 0 ? (costosData.totalCosto / costosData.totalPresupuesto) * 100 : 0
             }}
           />
         </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { parseNormalizedDate } from "../../utils";
-import { LogisticsData } from "../../types";
+import { LogisticsData, SistemaData } from "../../types";
 import {
   BarChart,
   Bar,
@@ -21,6 +21,7 @@ import ChartFilter from "../ChartFilter";
 
 interface PiezasProps {
   data: LogisticsData[];
+  sistemaData: SistemaData[];
   totalPiezas: number;
   renderIndicators: (title: string, value: number | string) => React.ReactNode;
   CustomTooltip: React.FC<any>;
@@ -51,6 +52,7 @@ const getShortName = (name: string, allNames: string[]) => {
 
 export default function Piezas({
   data,
+  sistemaData,
   totalPiezas,
   renderIndicators,
   CustomTooltip,
@@ -339,6 +341,81 @@ export default function Piezas({
     { key: "pctSinNovedad", label: "% Sin Novedad", align: "center" as const, render: (val: number) => `${val.toFixed(0)}%`, renderExpanded: (val: number) => `${val.toFixed(0)}%` },
   ];
 
+  const aggregatedSistemaData = useMemo(() => {
+    if (!isGeneral) return sistemaData;
+
+    const map = new Map<string, any>();
+    sistemaData.forEach(d => {
+      const suc = d.sucursal;
+      if (!map.has(suc)) {
+        map.set(suc, {
+          sucursal: suc,
+          piezasPlanilla: 0,
+          piezasConsulta: 0,
+          piezasHDR: 0,
+          piezasEntregadasPlanilla: 0,
+          piezasEntregadasConsulta: 0,
+          diferencia: 0,
+          distribuidores: new Set(),
+          rutas: new Set()
+        });
+      }
+      const obj = map.get(suc)!;
+      obj.piezasPlanilla += d.piezasPlanilla || 0;
+      obj.piezasConsulta += d.piezasConsulta || 0;
+      obj.piezasHDR += d.piezasHDR || 0;
+      obj.piezasEntregadasPlanilla += d.piezasEntregadasPlanilla || 0;
+      obj.piezasEntregadasConsulta += d.piezasEntregadasConsulta || 0;
+      obj.diferencia += d.diferencia || 0;
+      obj.distribuidores.add(d.distribuidor);
+      if (d.ruta) {
+        d.ruta.split(", ").forEach((r: string) => obj.rutas.add(r));
+      }
+    });
+
+    return Array.from(map.values()).map(obj => ({
+      ...obj,
+      totalDistribuidores: obj.distribuidores.size,
+      totalRutas: obj.rutas.size
+    }));
+  }, [sistemaData, isGeneral]);
+
+  const sistemaColumns = useMemo(() => {
+    if (isGeneral) {
+      return [
+        { key: "sucursal", label: "Sucursal", align: "left" as const },
+        { key: "piezasPlanilla", label: "Total P. Planilla", align: "center" as const },
+        { key: "piezasConsulta", label: "Total P. Consulta", align: "center" as const },
+        { key: "piezasHDR", label: "Total P. HDR", align: "center" as const },
+        { key: "diferencia", label: "Diferencia Total", align: "center" as const, render: (val: number) => (
+          <span className={val && val !== 0 ? "text-red-600 font-bold" : "text-emerald-600"}>
+            {val ?? 0}
+          </span>
+        )},
+        { key: "piezasEntregadasPlanilla", label: "T. P. Entregadas Planilla", align: "center" as const },
+        { key: "piezasEntregadasConsulta", label: "T. P. Entregadas Consulta", align: "center" as const },
+        { key: "totalDistribuidores", label: "Total Distribuidores", align: "center" as const },
+        { key: "totalRutas", label: "Total Rutas", align: "center" as const },
+      ];
+    }
+
+    return [
+      { key: "fecha", label: "Fecha", align: "center" as const },
+      { key: "ruta", label: "Ruta", align: "center" as const },
+      { key: "distribuidor", label: "Distribuidor", align: "left" as const },
+      { key: "piezasPlanilla", label: "P. Planilla", align: "center" as const },
+      { key: "piezasConsulta", label: "P. Consulta", align: "center" as const },
+      { key: "piezasHDR", label: "P. HDR", align: "center" as const },
+      { key: "diferencia", label: "Diferencia", align: "center" as const, render: (val: number) => (
+        <span className={val && val !== 0 ? "text-red-600 font-bold" : "text-emerald-600"}>
+          {val ?? 0}
+        </span>
+      )},
+      { key: "movil", label: "tipo de vehiculo", align: "center" as const },
+      { key: "cliente", label: "Cliente", align: "left" as const },
+    ];
+  }, [isGeneral]);
+
   const selectedEntityData = novedadesIndicatorsData.find(e => e.name === selectedNovedadEntity);
   const unselectedEntities = novedadesIndicatorsData.filter(e => e.name !== selectedNovedadEntity);
 
@@ -357,6 +434,14 @@ export default function Piezas({
       <Accordion title="Tabla de Datos" defaultOpen={false}>
         <SortableTable data={piezasData} columns={columns} getSubRows={getSubRowsPiezas} />
       </Accordion>
+
+      {sistemaData.length > 0 && (
+        <Accordion title="Tabla de Datos Sistema" defaultOpen={true}>
+          <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden shadow-sm">
+            <SortableTable data={aggregatedSistemaData} columns={sistemaColumns} />
+          </div>
+        </Accordion>
+      )}
 
       <Accordion title="Novedades" defaultOpen={false}>
         <div className="space-y-6">
