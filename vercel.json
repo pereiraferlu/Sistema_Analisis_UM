@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/export",
+      "destination": "https://flash-backend-lbej.onrender.com/api/export"
+    },
+    {
+      "source": "/api/export-consolidated",
+      "destination": "https://flash-backend-lbej.onrender.com/api/export-consolidated"
+    }
+  ]
+}
