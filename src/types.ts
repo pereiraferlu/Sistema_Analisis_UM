@@ -1,8 +1,26 @@
+export interface ConsultaGlobalData {
+  hojaRuta: number;
+  pieza: string;
+  estado: string;
+  bultos: number;
+  cliente: string;
+  localidad: string;
+}
+
+export interface DistribuidorData {
+  hojaRuta: number;
+  fecha: string;
+  cantidad: number;
+}
+
+export interface HistorialData extends LogisticsData {}
+
 export interface LogisticsData {
   fecha: string;
   distribuidor: string; // NOMBRE COMPLETO DEL MOVIL
   vehiculo: string; // TIPO DE VEHICULO, MARCA
   hojaRuta: string; // HOJAS DE RUTA- NUMERO
+  ruta: string; // RUTA
   retiros?: number; // RETIROS (Only in TUC SUC)
   piezasTotal: number; // CANTIDAD DE ID-PIEZAS A GESTIONAR
   bultosTotal: number; // CANTIDAD DE BULTOS A GESTIONAR
@@ -33,4 +51,19 @@ export interface DashboardState {
 export interface ParseWarning {
   sheetName: string;
   missingColumns: string[];
+}
+
+export interface SistemaData {
+  sucursal: string;
+  fecha: string;
+  ruta: string;
+  distribuidor: string;
+  movil: string;
+  cliente: string;
+  piezasPlanilla: number;
+  piezasConsulta: number;
+  piezasHDR: number;
+  piezasEntregadasPlanilla?: number;
+  piezasEntregadasConsulta?: number;
+  diferencia: number;
 }
