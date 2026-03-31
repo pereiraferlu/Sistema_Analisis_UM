@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, XCircle, FileSpreadsheet, AlertTriangle } from "lucide-react";
-import { LogisticsData } from "../types";
+import { LogisticsData, ConsultaGlobalData } from "../types";
 import { getRouteId, normalizeString, normalizeDate, getDifferences, normalizeZone } from "../utils";
 
 interface ValidationModalProps {
   data: LogisticsData[];
   existingData?: LogisticsData[];
+  consultaGlobal?: ConsultaGlobalData[];
   totals?: { piezas: number; bultos: number };
   existingPresupuestos?: Record<string, number>;
   pendingPresupuestos?: Record<string, number>;
   onConfirm: (data: LogisticsData[], newPresupuestos?: Record<string, number>, overwritePresupuestos?: boolean, idsToRemove?: string[]) => void;
   onCancel: () => void;
   missingColumns?: string[];
+  historialData?: any[];
 }
 
 const KNOWN_BRANCHES = [
@@ -42,12 +44,14 @@ const areRoutesEqual = (a: LogisticsData, b: LogisticsData) => {
 export default function ValidationModal({
   data,
   existingData = [],
+  consultaGlobal = [],
   totals,
   existingPresupuestos,
   pendingPresupuestos,
   onConfirm,
   onCancel,
   missingColumns = [],
+  historialData = [],
 }: ValidationModalProps) {
   const [selectedSucursal, setSelectedSucursal] = useState(KNOWN_BRANCHES[0]);
   const [budgetResolutions, setBudgetResolutions] = useState<Record<string, 'replace' | 'keep'>>({});
@@ -89,7 +93,7 @@ export default function ValidationModal({
       }).length;
   }, [pendingPresupuestos, selectedSucursal, existingPresupuestos]);
 
-  const [step, setStep] = useState<'missing_columns' | 'quantity_validation' | 'novedad_validation' | 'vehicle_mapping' | 'zone_mapping' | 'date_validation' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
+  const [step, setStep] = useState<'missing_columns' | 'quantity_validation' | 'novedad_validation' | 'estado_validation' | 'vehicle_mapping' | 'zone_mapping' | 'date_validation' | 'branch_selection' | 'budget_validation' | 'conflicts' | 'validation'>(
     missingColumns.length > 0 ? 'missing_columns' : 'quantity_validation'
   );
   const [stepHistory, setStepHistory] = useState<string[]>([]);
@@ -267,6 +271,123 @@ export default function ValidationModal({
     }));
   }, [initialNovedadDiscrepancyIndices, mappedData]);
 
+  const estadoDiscrepancies = useMemo(() => {
+    if (consultaGlobal.length === 0 || mappedData.length === 0) return [];
+
+    // Group consulta global by route for faster lookup
+    const consultaByRoute = new Map<string, any[]>();
+    consultaGlobal.forEach(c => {
+      const routeStr = String(c.hojaRuta);
+      if (!consultaByRoute.has(routeStr)) {
+        consultaByRoute.set(routeStr, []);
+      }
+      consultaByRoute.get(routeStr)?.push(c);
+    });
+
+    // Group mappedData by 'ruta'
+    const groupsByRuta = new Map<string, {
+      sucursal: string;
+      fecha: string;
+      hojasRuta: Set<string>;
+      piezasTotal: number;
+      piezasEntregadas: number;
+      piezasNoEntregadas: number;
+    }>();
+
+    mappedData.forEach((d, index) => {
+      if (excludedIndices.has(index)) return;
+      
+      const rutaKey = d.ruta || d.hojaRuta; // Fallback to hojaRuta if ruta is empty
+      if (!groupsByRuta.has(rutaKey)) {
+        groupsByRuta.set(rutaKey, {
+          sucursal: d.sucursal === "PENDING_SUCURSAL" ? selectedSucursal : d.sucursal,
+          fecha: d.fecha,
+          hojasRuta: new Set(),
+          piezasTotal: 0,
+          piezasEntregadas: 0,
+          piezasNoEntregadas: 0
+        });
+      }
+
+      const group = groupsByRuta.get(rutaKey)!;
+      d.hojaRuta.split('-').forEach(r => group.hojasRuta.add(r.trim()));
+      
+      const correction = corrections[index] || {};
+      group.piezasTotal += (correction.piezasTotal ?? d.piezasTotal);
+      group.piezasEntregadas += (correction.piezasEntregadas ?? d.piezasEntregadas);
+      group.piezasNoEntregadas += (correction.piezasNoEntregadas ?? d.piezasNoEntregadas);
+    });
+
+    const discrepancies: {
+      sucursal: string;
+      fecha: string;
+      hojaRuta: string;
+      ruta: string;
+      piezasTotal: number;
+      piezasEntregadas: number;
+      piezasNoEntregadas: number;
+      piezasNoEntregadasConsulta: number;
+      piezasNoEntregadasIds: string[];
+    }[] = [];
+
+    groupsByRuta.forEach((group, ruta) => {
+      let nonDeliveredInConsulta = 0;
+      let foundAnyHdr = false;
+      const nonDeliveredIds: string[] = [];
+
+      group.hojasRuta.forEach(hdr => {
+        const pieces = consultaByRoute.get(hdr);
+        if (pieces) {
+          foundAnyHdr = true;
+          pieces.forEach(p => {
+            if (normalizeString(p.estado) !== 'ENTREGADO') {
+              nonDeliveredInConsulta++;
+              nonDeliveredIds.push(p.pieza);
+            }
+          });
+        }
+      });
+
+      // If no HDR was found in consultaGlobal, skip (per user request)
+      if (!foundAnyHdr) return;
+
+      // Reconciliation check: pieces not delivered in planilla vs pieces with non-ENTREGADO status in consulta
+      if (group.piezasNoEntregadas !== nonDeliveredInConsulta) {
+        discrepancies.push({
+          sucursal: group.sucursal,
+          fecha: group.fecha,
+          hojaRuta: Array.from(group.hojasRuta).join(', '),
+          ruta: ruta,
+          piezasTotal: group.piezasTotal,
+          piezasEntregadas: group.piezasEntregadas,
+          piezasNoEntregadas: group.piezasNoEntregadas,
+          piezasNoEntregadasConsulta: nonDeliveredInConsulta,
+          piezasNoEntregadasIds: nonDeliveredIds
+        });
+      }
+    });
+
+    return discrepancies;
+  }, [mappedData, consultaGlobal, excludedIndices, corrections, selectedSucursal]);
+
+  const piezasEntregadasCount = useMemo(() => {
+    if (consultaGlobal.length === 0 || mappedData.length === 0) return 0;
+    
+    // Get all unique route IDs from mappedData (not excluded)
+    const activeRouteIds = new Set<string>();
+    mappedData.forEach((d, index) => {
+      if (excludedIndices.has(index)) return;
+      // Split routes if they contain hyphens (e.g., "20687-20688")
+      d.hojaRuta.split('-').forEach(r => activeRouteIds.add(r.trim()));
+    });
+
+    // Count pieces in consultaGlobal that match these routes AND are delivered
+    return consultaGlobal.filter(p => {
+      const routeStr = String(p.hojaRuta);
+      return activeRouteIds.has(routeStr) && normalizeString(p.estado) === 'ENTREGADO';
+    }).length;
+  }, [consultaGlobal, mappedData, excludedIndices]);
+
   const correctedNovedadesCount = useMemo(() => {
     return (Object.values(corrections) as Partial<LogisticsData>[]).filter(c => c.visitadasNovedad !== undefined || c.noVisitadas !== undefined).length;
   }, [corrections]);
@@ -316,6 +437,8 @@ export default function ValidationModal({
       setStep('quantity_validation');
     } else if (pendingNovedadDiscrepancies.length > 0) {
       setStep('novedad_validation');
+    } else if (consultaGlobal.length > 0 && estadoDiscrepancies.length > 0) {
+      setStep('estado_validation');
     } else if (needsVehicleMapping) {
       setStep('vehicle_mapping');
     } else if (needsZoneMapping) {
@@ -544,6 +667,7 @@ export default function ValidationModal({
       if (currentStep === 'missing_columns') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (consultaGlobal.length > 0 && estadoDiscrepancies.length > 0) return 'estado_validation';
         if (needsVehicleMapping) return 'vehicle_mapping';
         if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
@@ -553,6 +677,7 @@ export default function ValidationModal({
       if (currentStep === 'branch_selection') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (consultaGlobal.length > 0 && estadoDiscrepancies.length > 0) return 'estado_validation';
         if (needsVehicleMapping) return 'vehicle_mapping';
         if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
@@ -562,6 +687,7 @@ export default function ValidationModal({
       if (currentStep === 'quantity_validation') {
         if (pendingQuantityDiscrepancies.length > 0) return 'quantity_validation';
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (consultaGlobal.length > 0 && estadoDiscrepancies.length > 0) return 'estado_validation';
         if (needsVehicleMapping) return 'vehicle_mapping';
         if (needsZoneMapping) return 'zone_mapping';
         if (hasDifferentPresupuestos) return 'budget_validation';
@@ -570,8 +696,17 @@ export default function ValidationModal({
       }
       if (currentStep === 'novedad_validation') {
         if (pendingNovedadDiscrepancies.length > 0) return 'novedad_validation';
+        if (consultaGlobal.length > 0 && estadoDiscrepancies.length > 0) return 'estado_validation';
         if (needsVehicleMapping) return 'vehicle_mapping';
         if (needsZoneMapping) return 'zone_mapping';
+        if (hasDifferentPresupuestos) return 'budget_validation';
+        if (conflicts.length > 0) return 'conflicts';
+        return 'validation';
+      }
+      if (currentStep === 'estado_validation') {
+        if (needsVehicleMapping) return 'vehicle_mapping';
+        if (needsZoneMapping) return 'zone_mapping';
+        if (pendingDateDiscrepancies.length > 0) return 'date_validation';
         if (hasDifferentPresupuestos) return 'budget_validation';
         if (conflicts.length > 0) return 'conflicts';
         return 'validation';
@@ -1097,6 +1232,33 @@ export default function ValidationModal({
                 </div>
               </div>
             </div>
+          ) : step === 'estado_validation' ? (
+            <div className="space-y-6">
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center space-x-2 mb-4 text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold uppercase tracking-wider">Validación de Estados</h3>
+                </div>
+
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {estadoDiscrepancies.map((disc, idx) => (
+                    <div key={idx} className="p-4 bg-white rounded-xl border border-amber-200 shadow-sm space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                          {disc.sucursal}
+                        </span>
+                        <span className="px-2 py-0.5 bg-secondary-100 text-secondary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                          {disc.fecha}
+                        </span>
+                        <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                          PIEZAS: {disc.piezasNoEntregadasIds.join(', ')}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           ) : step === 'vehicle_mapping' ? (
             <div className="space-y-6">
               <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
@@ -1506,6 +1668,16 @@ export default function ValidationModal({
                     label: "Presupuestos", 
                     value: budgetStatus.text,
                     colorClass: budgetStatus.color
+                  },
+                  { 
+                    label: "Piezas con estado entregado", 
+                    value: piezasEntregadasCount,
+                    colorClass: piezasEntregadasCount > 0 ? "text-success-600" : "text-secondary-500"
+                  },
+                  { 
+                    label: "Historial", 
+                    value: historialData.length > 0 ? "Detectado" : "No detectado",
+                    colorClass: historialData.length > 0 ? "text-success-600" : "text-danger-600"
                   },
                 ].map((item, index) => (
                   <div

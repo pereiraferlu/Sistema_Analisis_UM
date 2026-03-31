@@ -371,6 +371,28 @@ export default function SortableTable({ columns, data, customTotals, getSubRows,
                 );
               }
 
+              if (col.key === "porcentajeGastado") {
+                const totalPresupuesto = totals["presupuesto"] || 0;
+                const totalCosto = totals["costoTotal"] || 0;
+                const pct = totalPresupuesto > 0 ? (totalCosto / totalPresupuesto) * 100 : 0;
+                return (
+                  <td
+                    key={col.key}
+                    className={`px-3 py-3 whitespace-nowrap text-xs text-secondary-900 ${alignClass}`}
+                  >
+                    {col.align === "center" ? (
+                      <div className="flex justify-center">
+                        <div className="text-right min-w-[60px]">
+                          {pct.toFixed(0)}%
+                        </div>
+                      </div>
+                    ) : (
+                      `${pct.toFixed(0)}%`
+                    )}
+                  </td>
+                );
+              }
+
               if (col.key === "percent") {
                 return (
                   <td

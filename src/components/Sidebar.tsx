@@ -13,24 +13,32 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   onExportReport: () => void;
+  onExportSistema: () => void;
+  onExportMissingClients: () => void;
   onAddRoutes: () => void;
   onRevalidate: () => void;
   onReset: () => void;
   onSaveAndExport: () => void;
   isExporting: boolean;
+  isExportingSistema: boolean;
   isSaving: boolean;
+  hasSistemaData: boolean;
 }
 
 export default function Sidebar({
   isOpen,
   onClose,
   onExportReport,
+  onExportSistema,
+  onExportMissingClients,
   onAddRoutes,
   onRevalidate,
   onReset,
   onSaveAndExport,
   isExporting,
-  isSaving
+  isExportingSistema,
+  isSaving,
+  hasSistemaData
 }: SidebarProps) {
   return (
     <AnimatePresence>
@@ -76,6 +84,36 @@ export default function Sidebar({
                   {isExporting ? "Exportando..." : "Exportar Reporte"}
                 </span>
               </button>
+
+              {hasSistemaData && (
+                <>
+                  <button
+                    onClick={onExportSistema}
+                    disabled={isExportingSistema}
+                    className="w-full flex items-center p-3 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all duration-200 group cursor-pointer disabled:opacity-50"
+                  >
+                    <div className="p-2 bg-indigo-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                      <FileSpreadsheet className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="text-sm font-medium text-left">
+                      {isExportingSistema ? "Exportando..." : "Exportar Reporte Sistema"}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={onExportMissingClients}
+                    disabled={isExportingSistema}
+                    className="w-full flex items-center p-3 rounded-xl bg-cyan-50 text-cyan-700 hover:bg-cyan-100 transition-all duration-200 group cursor-pointer disabled:opacity-50"
+                  >
+                    <div className="p-2 bg-cyan-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
+                      <Download className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="text-sm font-medium text-left">
+                      Exportar Clientes Faltantes
+                    </span>
+                  </button>
+                </>
+              )}
 
               <button
                 onClick={() => { onAddRoutes(); onClose(); }}
