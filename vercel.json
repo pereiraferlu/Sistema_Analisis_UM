@@ -11,6 +11,10 @@
     {
       "source": "/api/export-discrepancies",
       "destination": "https://flash-backend-lbej.onrender.com/api/export-discrepancies"
+    },
+    {
+      "source": "/api/export-route-discrepancies",
+      "destination": "https://flash-backend-lbej.onrender.com/api/export-route-discrepancies"
     }
   ]
 }
