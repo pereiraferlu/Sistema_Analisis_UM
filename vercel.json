@@ -7,6 +7,10 @@
     {
       "source": "/api/export-consolidated",
       "destination": "https://flash-backend-lbej.onrender.com/api/export-consolidated"
+    },
+    {
+      "source": "/api/export-discrepancies",
+      "destination": "https://flash-backend-lbej.onrender.com/api/export-discrepancies"
     }
   ]
 }
