@@ -402,6 +402,7 @@ export default function Piezas({
     return [
       { key: "fecha", label: "Fecha", align: "center" as const },
       { key: "ruta", label: "Ruta", align: "center" as const },
+      { key: "hojasRuta", label: "Hojas de Ruta (HDR)", align: "left" as const },
       { key: "distribuidor", label: "Distribuidor", align: "left" as const },
       { key: "piezasPlanilla", label: "P. Planilla", align: "center" as const },
       { key: "piezasConsulta", label: "P. Consulta", align: "center" as const },
@@ -436,7 +437,7 @@ export default function Piezas({
       </Accordion>
 
       {sistemaData.length > 0 && (
-        <Accordion title="Tabla de Datos Sistema" defaultOpen={true}>
+        <Accordion title="Tabla de Datos Sistema" defaultOpen={false}>
           <div className="bg-white rounded-xl border border-secondary-200 overflow-hidden shadow-sm">
             <SortableTable data={aggregatedSistemaData} columns={sistemaColumns} />
           </div>
@@ -447,7 +448,9 @@ export default function Piezas({
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-normal text-secondary-900">
-              {isGeneral ? "Sucursales sin Novedad" : "Distribuidores sin Novedad"}
+              {novedadesIndicatorsData.length === 0 
+                ? "Todas las rutas tienen novedades" 
+                : (isGeneral ? "Sucursales sin Novedad" : "Distribuidores sin Novedad")}
             </h3>
             <button
               onClick={() => setShowNovedadesTable(!showNovedadesTable)}

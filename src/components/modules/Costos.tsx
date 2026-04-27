@@ -254,7 +254,7 @@ export default function Costos({
               type="number"
               autoFocus
               className="w-24 px-2 py-1 text-right border border-primary-500 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
-              value={numVal || ""}
+              value={isNaN(numVal) ? "" : numVal || ""}
               onChange={(e) => onPresupuestoChange(row.name, e.target.value)}
               onBlur={() => setEditingCell(null)}
               onKeyDown={(e) => {
