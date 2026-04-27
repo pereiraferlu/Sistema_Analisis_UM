@@ -1533,7 +1533,7 @@ export default function ValidationModal({
         })
       };
 
-      const response = await fetch(`${window.location.origin}/api/export-corrected-data`, {
+      const response = await fetch(`/api/export-corrected-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -1750,7 +1750,7 @@ export default function ValidationModal({
       rutasResumenData.push({ descripcion: "Total piezas encontradas en consulta", cantidad: hdrDiscrepancies.route.reduce((acc, d) => acc + d.piezasHDR, 0) });
       rutasResumenData.push({ descripcion: "Total HDR no encontrada en consulta", cantidad: estadoDiscrepancies.missingHdrs.length });
 
-      const response = await fetch(`${window.location.origin}/api/export-discrepancies`, {
+      const response = await fetch(`/api/export-discrepancies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

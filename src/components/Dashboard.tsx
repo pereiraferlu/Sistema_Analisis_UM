@@ -100,8 +100,8 @@ export default function Dashboard({ data, sistemaData, fileName, onReset, onAddF
     setIsExportingSistema(true);
     try {
       const url = type === 'general' 
-        ? `${window.location.origin}/api/export` 
-        : `${window.location.origin}/api/export-consolidated`; 
+        ? `/api/export` 
+        : `/api/export-consolidated`; 
       
       const response = await fetch(url, {
         method: 'POST',
@@ -168,7 +168,7 @@ export default function Dashboard({ data, sistemaData, fileName, onReset, onAddF
         return filtered;
       });
       
-      const response = await fetch(`${window.location.origin}/api/export`, {
+      const response = await fetch(`/api/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -223,7 +223,7 @@ export default function Dashboard({ data, sistemaData, fileName, onReset, onAddF
         return filtered;
       });
 
-      const response = await fetch(`${window.location.origin}/api/export-consolidated`, {
+      const response = await fetch(`/api/export-consolidated`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
