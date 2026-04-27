@@ -406,16 +406,43 @@ async def export_consolidated(payload: dict = Body(...)):
         suc_df = df[df['sucursal'] == suc].copy()
         # Ensure columns are in a consistent order for re-import
         cols = [
-            'fecha', 'distribuidor', 'vehiculo', 'hojaRuta', 'retiros',
+            'fecha', 'distribuidor', 'vehiculo', 'hojaRuta', 'ruta', 'retiros',
             'piezasTotal', 'bultosTotal', 'palets', 'peso', 'zona',
             'piezasEntregadas', 'piezasNoEntregadas', 'visitadasNovedad',
-            'noVisitadas', 'bultosEntregados', 'bultosDevueltos', 'costoTotal',
-            'presupuesto', 'observaciones'
+            'noVisitadas', 'bultosEntregados', 'bultosDevueltos', 'bultosNoEntregados', 'costoTotal',
+            'presupuesto', 'observaciones', 'cliente'
         ]
         
         # Only keep columns that exist in the dataframe
         existing_cols = [c for c in cols if c in suc_df.columns]
         suc_df = suc_df[existing_cols]
+
+        # Rename columns for a more professional look
+        rename_dict = {
+            'fecha': 'Fecha',
+            'distribuidor': 'Distribuidor',
+            'vehiculo': 'Vehículo',
+            'hojaRuta': 'Hoja de Ruta',
+            'retiros': 'Retiros',
+            'piezasTotal': 'Piezas Total',
+            'bultosTotal': 'Bultos Total',
+            'palets': 'Palets',
+            'peso': 'Peso',
+            'zona': 'Zona',
+            'piezasEntregadas': 'Piezas Entregadas',
+            'piezasNoEntregadas': 'Piezas No Entregadas',
+            'visitadasNovedad': 'Visitadas Novedad',
+            'noVisitadas': 'No Visitadas',
+            'bultosEntregados': 'Bultos Entregados',
+            'bultosDevueltos': 'Bultos Devueltos',
+            'bultosNoEntregados': 'Bultos No Entregados',
+            'costoTotal': 'Costo Total',
+            'presupuesto': 'Presupuesto',
+            'observaciones': 'Observaciones',
+            'ruta': 'Ruta',
+            'cliente': 'Cliente'
+        }
+        suc_df.rename(columns={k: v for k, v in rename_dict.items() if k in suc_df.columns}, inplace=True)
         
         # Clean sheet name (max 31 chars, no special chars)
         sheet_name = str(suc)[:31]
