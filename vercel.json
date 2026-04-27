@@ -1,44 +1,12 @@
 {
   "rewrites": [
     {
-      "source": "/api/export",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export"
+      "source": "/api/:match*",
+      "destination": "https://flash-backend-lbej.onrender.com/api/:match*"
     },
     {
-      "source": "/api/export-consolidated",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-consolidated"
-    },
-    {
-      "source": "/api/export-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-discrepancies"
-    },
-    {
-      "source": "/api/export-route-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-route-discrepancies"
-    },
-    {
-      "source": "/api/export-quantity-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-quantity-discrepancies"
-    },
-    {
-      "source": "/api/export-novedad-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-novedad-discrepancies"
-    },
-    {
-      "source": "/api/export-vehicle-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-vehicle-discrepancies"
-    },
-    {
-      "source": "/api/export-zone-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-zone-discrepancies"
-    },
-    {
-      "source": "/api/export-date-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-date-discrepancies"
-    },
-    {
-      "source": "/api/export-all-discrepancies",
-      "destination": "https://flash-backend-lbej.onrender.com/api/export-all-discrepancies"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
