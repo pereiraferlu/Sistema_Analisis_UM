@@ -44,7 +44,7 @@ interface DashboardProps {
   sistemaData: SistemaData[];
   fileName: string;
   onReset: () => void;
-  onAddFile?: () => void;
+  onAddFiles?: () => void;
   onRevalidate?: () => void;
   presupuestos: Record<string, number>;
   onPresupuestoChange: (sucursal: string, value: string) => void;
@@ -60,7 +60,7 @@ const COLORS = [
   "#ec4899",
 ];
 
-export default function Dashboard({ data, sistemaData, fileName, onReset, onAddFile, onRevalidate, presupuestos, onPresupuestoChange, historialData = [] }: DashboardProps) {
+export default function Dashboard({ data, sistemaData, fileName, onReset, onAddFiles, onRevalidate, presupuestos, onPresupuestoChange, historialData = [] }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("Distribuidores");
   const [selectedSucursal, setSelectedSucursal] = useState<string>("General");
   const [isExporting, setIsExporting] = useState(false);
@@ -208,11 +208,11 @@ export default function Dashboard({ data, sistemaData, fileName, onReset, onAddF
     setIsSaving(true);
     try {
       const consolidatedCols = [
-        'sucursal', 'fecha', 'distribuidor', 'vehiculo', 'hojaRuta', 'retiros',
+        'sucursal', 'fecha', 'distribuidor', 'vehiculo', 'hojaRuta', 'ruta', 'retiros',
         'piezasTotal', 'bultosTotal', 'palets', 'peso', 'zona',
         'piezasEntregadas', 'piezasNoEntregadas', 'visitadasNovedad',
-        'noVisitadas', 'bultosEntregados', 'bultosDevueltos', 'costoTotal',
-        'presupuesto', 'observaciones'
+        'noVisitadas', 'bultosEntregados', 'bultosDevueltos', 'bultosNoEntregados', 'costoTotal',
+        'presupuesto', 'observaciones', 'cliente'
       ];
 
       const cleanData = data.map(item => {
@@ -385,7 +385,7 @@ export default function Dashboard({ data, sistemaData, fileName, onReset, onAddF
         onExportReport={handleExport}
         onExportSistema={() => handleExportSistema('general')}
         onExportMissingClients={() => setShowClientSelector(true)}
-        onAddRoutes={onAddFile || (() => {})}
+        onAddFiles={onAddFiles || (() => {})}
         onRevalidate={onRevalidate || (() => {})}
         onReset={onReset}
         onSaveAndExport={handleSaveAndExport}

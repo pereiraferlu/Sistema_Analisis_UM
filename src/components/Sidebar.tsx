@@ -15,7 +15,7 @@ interface SidebarProps {
   onExportReport: () => void;
   onExportSistema: () => void;
   onExportMissingClients: () => void;
-  onAddRoutes: () => void;
+  onAddFiles: () => void;
   onRevalidate: () => void;
   onReset: () => void;
   onSaveAndExport: () => void;
@@ -31,7 +31,7 @@ export default function Sidebar({
   onExportReport,
   onExportSistema,
   onExportMissingClients,
-  onAddRoutes,
+  onAddFiles,
   onRevalidate,
   onReset,
   onSaveAndExport,
@@ -116,13 +116,13 @@ export default function Sidebar({
               )}
 
               <button
-                onClick={() => { onAddRoutes(); onClose(); }}
+                onClick={() => { onAddFiles(); onClose(); }}
                 className="w-full flex items-center p-3 rounded-xl bg-violet-50 text-violet-700 hover:bg-violet-100 transition-all duration-200 group cursor-pointer"
               >
                 <div className="p-2 bg-violet-600 rounded-lg mr-4 group-hover:scale-110 transition-transform">
                   <PlusCircle className="w-4 h-4 text-white" />
                 </div>
-                <span className="text-sm font-medium text-left">Agregar Rutas</span>
+                <span className="text-sm font-medium text-left">Agregar o Quitar Archivos</span>
               </button>
 
               <button
