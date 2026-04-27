@@ -1,16 +1,20 @@
 export interface ConsultaGlobalData {
-  hojaRuta: number;
+  hojaRuta: string;
   pieza: string;
   estado: string;
   bultos: number;
   cliente: string;
   localidad: string;
+  fechaCambioEstado?: string;
+  codigo?: string;
+  sourceFile?: string;
 }
 
 export interface DistribuidorData {
-  hojaRuta: number;
+  hojaRuta: string;
   fecha: string;
   cantidad: number;
+  sourceFile?: string;
 }
 
 export interface HistorialData extends LogisticsData {}
@@ -40,6 +44,8 @@ export interface LogisticsData {
   observaciones: string; // OBSERVACIONES
   cliente: string; // CLIENTES
   sucursal: string; // Derived from sheet name
+  sheetName?: string; // Original sheet name
+  sourceFile?: string;
 }
 
 export interface DashboardState {
@@ -63,6 +69,7 @@ export interface SistemaData {
   piezasPlanilla: number;
   piezasConsulta: number;
   piezasHDR: number;
+  hojasRuta?: string;
   piezasEntregadasPlanilla?: number;
   piezasEntregadasConsulta?: number;
   diferencia: number;

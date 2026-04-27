@@ -9,6 +9,7 @@ export const normalizeString = (val: any) => {
 };
 
 export interface Difference {
+  key: keyof LogisticsData;
   field: string;
   existing: any;
   incoming: any;
@@ -21,18 +22,20 @@ export const getDifferences = (a: LogisticsData, b: LogisticsData) => {
     return isNaN(n) ? 0 : Math.round(n * 100) / 100;
   };
 
-  const check = (field: string, label: string, valA: any, valB: any, isNum = false) => {
+  const check = (key: keyof LogisticsData, label: string, valA: any, valB: any, isNum = false) => {
     if (isNum) {
       if (num(valA) !== num(valB)) {
-        diffs.push({ field: label, existing: valA, incoming: valB });
+        diffs.push({ key, field: label, existing: valA, incoming: valB });
       }
     } else {
       if (normalizeString(valA) !== normalizeString(valB)) {
-        diffs.push({ field: label, existing: valA, incoming: valB });
+        diffs.push({ key, field: label, existing: valA, incoming: valB });
       }
     }
   };
 
+  check("fecha", "Fecha", a.fecha, b.fecha);
+  check("hojaRuta", "Hoja de Ruta", a.hojaRuta, b.hojaRuta);
   check("distribuidor", "Distribuidor", a.distribuidor, b.distribuidor);
   check("cliente", "Cliente", a.cliente, b.cliente);
   check("vehiculo", "Vehículo", a.vehiculo, b.vehiculo);
@@ -169,7 +172,15 @@ export const normalizeSucursalName = (name: string): string => {
 };
 
 export const normalizeHojaRuta = (val: any) => {
-  return normalizeString(val).replace(/\s*-\s*/g, "-"); // Remove spaces around hyphens
+  const normalized = normalizeString(val).replace(/\s*[\-\/]\s*/g, "-");
+  if (normalized.includes("-")) {
+    return normalized.split("-")
+      .map(s => s.trim())
+      .filter(s => s !== "")
+      .sort()
+      .join("-");
+  }
+  return normalized;
 };
 
 export const normalizeZone = (zone: string) => {
@@ -209,8 +220,19 @@ export const normalizeZone = (zone: string) => {
 };
 
 export const getRouteId = (d: LogisticsData) => {
-  const sucursal = normalizeString(d.sucursal);
-  const hojaRuta = normalizeHojaRuta(d.hojaRuta);
-  const fecha = normalizeDate(d.fecha);
-  return `${sucursal}|${hojaRuta}|${fecha}`;
+  return normalizeHojaRuta(d.hojaRuta);
+};
+
+export const normalizeAccents = (str: string) => {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+};
+
+export const isStateEntregado = (estadoVal: any): boolean => {
+  const normState = normalizeAccents(normalizeString(estadoVal));
+  return (
+    normState === 'ENTREGADO' ||
+    normState === 'EN PROCESO DE DEVOLUCION' ||
+    normState === 'DEVUELVO AL CLIENTE' ||
+    normState === 'DEVOLUCION AL CLIENTE'
+  );
 };
